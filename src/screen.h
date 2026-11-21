@@ -18,6 +18,7 @@ class Screen
     static constexpr Ink orange = 0xffff7131, lilac = 0xffbc99f5, paper = 0xfffff4db;
     static constexpr Ink muted = 0xffd0b4e7, grid = 0xff3d3046, panel = 0xff241d32;
     static constexpr int pages = paramCount / 3;
+    static_assert (paramCount % 3 == 0, "a page holds three parameters: one added alone would not be reachable");
     hdui::Picture picture;
     std::array<float, ParamId::count> values {};
     int page = 0, lastPage = -1, lastPulse = -1;
@@ -212,7 +213,8 @@ public:
             knobsMoved |= c.knobs[k].position != lastKnobs[k].position || c.knobs[k].engaged != lastKnobs[k].engaged;
             lastKnobs[k] = c.knobs[k];
         }
-        if (seenHits != hits) { seenHits = hits; hitAt = c.now_ms; pulsing = true; }
+        // A hit while the page was away is counted, not shown: a whole paint opens without a pulse.
+        if (seenHits != hits) { seenHits = hits; if (! whole) hitAt = c.now_ms, pulsing = true; }
         const uint64_t age = c.now_ms - hitAt;
         pulsing = pulsing && age < 180;
         const int pulse = pulsing ? 6 - (int) (age / 30) : 0;

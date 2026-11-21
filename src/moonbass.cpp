@@ -521,9 +521,12 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
         p.engine.transport (false, false, 0.0, 120.0, frames);
 
     // A sleeping host may deliver this much later. Only audition a recent press.
-    const auto pressed = p.pressedAt.exchange (0, std::memory_order_acquire);
-    if (pressed && steadyMs() - pressed <= 500)
-        p.engine.press (ParamId::play);
+    if (p.pressedAt.load (std::memory_order_relaxed) != 0)
+    {
+        const auto pressed = p.pressedAt.exchange (0, std::memory_order_acquire);
+        if (pressed && steadyMs() - pressed <= 500)
+            p.engine.press (ParamId::play);
+    }
 
     uint32_t done = 0;
     while (done < frames)

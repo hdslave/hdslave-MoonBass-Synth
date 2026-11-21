@@ -1145,6 +1145,27 @@ void testBounded()
     }
 }
 // Exercise the extension through the built CLAP, including a host that skips silent blocks.
+// A load drops a page press still waiting for the audio thread: Push alone sounds the kick, Push then a preset load
+// before the next block stays silent.
+void testPushThenLoad()
+{
+    auto peakAfterPush = [] (bool load) {
+        Instance a;
+        const auto* page = static_cast<const clap_plugin_melodee_screen*> (a.plugin->get_extension (a.plugin, CLAP_EXT_MELODEE_SCREEN));
+        std::vector<float> l, r;
+        a.render (128 * 4, 128, l, r, stopped);
+        const melodee_screen_input_t push { MELODEE_SCREEN_PUSH, 0, false };
+        CHECK (page != nullptr && page->input (a.plugin, &push));
+        if (load) CHECK (a.loadPreset ("default"));
+        a.render (12000, 128, l, r, stopped);
+        float peak = 0.0f;
+        for (float v : l) peak = std::max (peak, std::fabs (v));
+        return peak;
+    };
+    CHECK (peakAfterPush (false) > 0.1f);
+    CHECK (peakAfterPush (true) == 0.0f);
+}
+
 void testScreen()
 {
     Instance a;
@@ -1274,6 +1295,7 @@ int main (int argc, char** argv)
     testDescription();
     testParameters();
     testScreen();
+    testPushThenLoad();
     testState();
     testPresets (argv[2]);
     testTiming();
