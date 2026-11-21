@@ -5,6 +5,7 @@
 // MIDI controller map, Play, and bounded output at random and extreme settings. Writes demo renders as WAV files.
 //   host MoonBass.clap OUT_FOLDER
 #include "wav.h"
+#include "../src/melodee_screen.h"
 
 #include <clap/clap.h>
 
@@ -18,6 +19,8 @@
 #include <map>
 #include <random>
 #include <set>
+#include <chrono>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -33,15 +36,18 @@ const clap_plugin_factory* factory = nullptr;
 
 // The host side: log, and the two a preset load tells (counted); the plug-in must cope without the rest.
 int rescans = 0, presetsLoaded = 0, presetErrors = 0;
+int paints = 0, processRequests = 0, flushes = 0;
 const void* hostExtension (const clap_host*, const char* id)
 {
     static const clap_host_log log { [] (const clap_host*, clap_log_severity s, const char* m) { std::printf ("  [plug-in log %d] %s\n", (int) s, m); } };
     static const clap_host_params params { [] (const clap_host*, clap_param_rescan_flags f) { rescans += (f & CLAP_PARAM_RESCAN_VALUES) != 0; },
-                                           [] (const clap_host*, clap_id, clap_param_clear_flags) {}, [] (const clap_host*) {} };
+                                           [] (const clap_host*, clap_id, clap_param_clear_flags) {}, [] (const clap_host*) { ++flushes; } };
     static const clap_host_preset_load presetLoad {
         [] (const clap_host*, uint32_t, const char*, const char*, int32_t, const char*) { ++presetErrors; },
         [] (const clap_host*, uint32_t, const char*, const char*) { ++presetsLoaded; },
     };
+    static const clap_host_melodee_screen screen { [] (const clap_host*) { ++paints; } };
+    if (std::strcmp (id, CLAP_EXT_MELODEE_SCREEN_HOST) == 0) return &screen;
     if (std::strcmp (id, CLAP_EXT_LOG) == 0) return &log;
     if (std::strcmp (id, CLAP_EXT_PARAMS) == 0) return &params;
     if (std::strcmp (id, CLAP_EXT_PRESET_LOAD) == 0) return &presetLoad;
@@ -50,7 +56,7 @@ const void* hostExtension (const clap_host*, const char* id)
 
 clap_host host {
     CLAP_VERSION, nullptr, "MoonBass test host", "tests", "", "1",
-    hostExtension, [] (const clap_host*) {}, [] (const clap_host*) {}, [] (const clap_host*) {},
+    hostExtension, [] (const clap_host*) {}, [] (const clap_host*) { ++processRequests; }, [] (const clap_host*) {},
 };
 
 // Input events for one process call, in time order.
@@ -1138,6 +1144,116 @@ void testBounded()
                 }
     }
 }
+// Exercise the extension through the built CLAP, including a host that skips silent blocks.
+void testScreen()
+{
+    Instance a;
+    const auto* page = static_cast<const clap_plugin_melodee_screen*> (a.plugin->get_extension (a.plugin, CLAP_EXT_MELODEE_SCREEN));
+    CHECK (page != nullptr);
+    if (!page) return;
+    constexpr int stride = 327;
+    constexpr uint32_t guard = 0x13472568;
+    std::vector<uint32_t> memory (stride * 218, guard);
+    melodee_screen_canvas_t c {};
+    c.pixels = memory.data();
+    c.width = 320; c.height = 218; c.stride = stride; c.now_ms = 1000;
+    for (auto& k : c.knobs) k = { -1, false };
+    auto draw = [&](bool whole = false) { c.whole = whole; return page->paint (a.plugin, &c); };
+    auto input = [&](uint32_t kind, int delta, bool shift = false) {
+        melodee_screen_input_t e { kind, delta, shift };
+        return page->input (a.plugin, &e);
+    };
+    auto region = [&](int x, int y, int w, int h) {
+        std::vector<uint32_t> pixels;
+        for (int j = y; j < y + h; ++j)
+            pixels.insert (pixels.end(), memory.begin() + j * stride + x, memory.begin() + j * stride + x + w);
+        return pixels;
+    };
+    CHECK (draw (true) && !draw());
+    CHECK (std::count (memory.begin(), memory.end(), guard) == 7 * 218);
+    const auto rest = memory;
+    const auto globe = region (0, 45, 164, 122);
+    const auto pitchCurve = region (164, 45, 156, 61);
+    const auto ampCurve = region (164, 106, 156, 61);
+    // Every page binds its original triplet. The Play button uses the encoder press.
+    for (int n = 0; n < 14; ++n)
+    {
+        clap_id ids[3];
+        page->knobs (a.plugin, ids);
+        for (int k = 0; k < 3; ++k)
+        {
+            clap_param_info info {};
+            CHECK (a.params->get_info (a.plugin, n * 3 + k, &info));
+            CHECK (ids[k] == (info.id == a.id ("Play") ? CLAP_INVALID_ID : info.id));
+        }
+        if (n < 13) { CHECK (input (MELODEE_SCREEN_NUDGE, 1)); CHECK (draw()); }
+    }
+    CHECK (input (MELODEE_SCREEN_NUDGE, 1) && !draw());
+    // The last page is above bit 31 in the pending edit mask. A full output list retries.
+    input (MELODEE_SCREEN_WHEEL, 1);
+    Events empty;
+    clap_output_events full { nullptr, [] (const clap_output_events*, const clap_event_header*) { return false; } };
+    a.params->flush (a.plugin, &empty.in, &full);
+    OutEvents retry;
+    a.params->flush (a.plugin, &empty.in, &retry.out);
+    CHECK ((retry.values == std::vector<std::pair<clap_id, double>> { { a.id ("CV 4 Dest"), 1.0 } }));
+    CHECK (a.loadPreset ("default"));
+    for (int i = 0; i < 13; ++i) input (MELODEE_SCREEN_NUDGE, -1);
+    CHECK (draw() && memory == rest);
+    c.knobs[0] = { 105, false };
+    CHECK (draw() && region (0, 45, 164, 122) == globe);
+    c.knobs[0].engaged = true;
+    CHECK (draw() && memory == rest);
+    c.shift = true; CHECK (draw()); c.shift = false; CHECK (draw() && memory == rest);
+
+    const int rescanBefore = rescans, flushBefore = flushes;
+    input (MELODEE_SCREEN_WHEEL, 16);
+    CHECK (rescans == rescanBefore + 1 && flushes == flushBefore + 1);
+    CHECK_NEAR (a.value ("Tune"), 0.625, 1e-6);
+    CHECK (draw() && region (164, 45, 156, 61) != pitchCurve && region (164, 106, 156, 61) == ampCurve);
+    OutEvents out;
+    Events none;
+    a.params->flush (a.plugin, &none.in, &out.out);
+    CHECK ((out.values == std::vector<std::pair<clap_id,double>> { { a.id ("Tune"), 0.625 } }));
+    input (MELODEE_SCREEN_WHEEL, -1, true);
+    CHECK_NEAR (a.value ("Tune"), 0.625 - 1.0 / 1024, 1e-6);
+    const int paintBefore = paints;
+    a.setup ({ { "Gate Time", 1.0 }, { "Compression", 0.5 } });
+    CHECK (paints > paintBefore && draw() && region (164, 106, 156, 61) != ampCurve);
+    CHECK (a.loadPreset ("default") && draw() && memory == rest);
+
+    auto sound = [&] { return a.play ({}, 0.02); };
+    const int wakeBefore = processRequests;
+    input (MELODEE_SCREEN_PUSH, 1);
+    CHECK (processRequests > wakeBefore);
+    std::this_thread::sleep_for (std::chrono::milliseconds (550));
+    auto quiet = sound();
+    CHECK (peak (quiet, 0, quiet.size()) == 0 && !draw());
+    input (MELODEE_SCREEN_PUSH, 1);
+    a.params->flush (a.plugin, &none.in, &out.out); // only process consumes an audition
+    auto kick = sound();
+    CHECK (peak (kick, 0, kick.size()) > 0.1f);
+    const int beforeAnimation = paints;
+    CHECK (draw() && region (0, 45, 164, 122) != globe && paints > beforeAnimation);
+    c.now_ms += 60;
+    CHECK (draw()); // two frames into the pulse, without another audio block
+    c.now_ms += 200;
+    CHECK (draw() && memory == rest);
+    const int resting = paints;
+    CHECK (!draw() && paints == resting);
+    a.setup ({ { "Split Mode", 1 } }); // C1 only
+    a.play ({ { 0, 37 } }, 0.01);
+    draw();
+    CHECK (region (0, 45, 164, 122) == globe);
+    a.play ({ { 0, 36 } }, 0.01);
+    CHECK (draw() && region (0, 45, 164, 122) != globe);
+
+    c.stride = 319; CHECK (!draw (true)); c.stride = stride;
+    CHECK (!page->paint (a.plugin, nullptr) && !page->input (a.plugin, nullptr));
+    CHECK (!input (99, 1));
+    for (int j = 0; j < 218; ++j)
+        for (int x = 320; x < stride; ++x) CHECK (memory[j * stride + x] == guard);
+}
 } // namespace
 
 int main (int argc, char** argv)
@@ -1157,6 +1273,7 @@ int main (int argc, char** argv)
     factory = static_cast<const clap_plugin_factory*> (entry->get_factory (CLAP_PLUGIN_FACTORY_ID));
     testDescription();
     testParameters();
+    testScreen();
     testState();
     testPresets (argv[2]);
     testTiming();

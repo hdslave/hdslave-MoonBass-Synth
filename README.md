@@ -3,7 +3,7 @@
 An analog-style kick drum synthesizer as a CLAP plug-in, built for the Akai MPC Sample running Melodee (64-bit ARM
 Linux, Cortex-A55). Hosts list it as **hdslave MoonBass** (id `com.hdslave.moonbass`). It follows the Jomox ModBase 09
 (Mk I and Mk II) and MBase 11: their eight knobs, and every parameter their menus, second functions and LED pages
-hide. Each sits on Melodee's Edit pages, three to a page, so nothing needs a shift key.
+hide. Orbital Impact puts them on the MPC Sample’s screen, three to a page.
 
 One voice, played by notes (pads, keys, the host's sequencer) or its Play button, as the hardware is played by MIDI.
 
@@ -18,10 +18,19 @@ VCO ──► VCA (held for the gate, then Decay; Compression cuts the tail) ─
 CV 1-4 In × Amt ──► any of 16 destinations          velocity (Dynamics) × Accent × the gate's charge ──► level
 ```
 
+## Orbital Impact
+
+In hdslaveOS, MoonBass draws a wireframe moon on Melodee’s Edit and Stage plug-in pages. A kick briefly flattens the mesh. The orange graph previews the first 100 ms of pitch sweep above the resting note. The violet graph shows the gate hold and amplitude decay, including the effect of Compression. Both graphs follow the patch and its CV settings. The amplitude graph’s time scale changes for long tails.
+
+![MoonBass in Melodee’s Edit page](docs/orbital-impact.png)
+
+Press the encoder to play a kick from any page. Minus and Plus change pages. Turn K1–K3 to change the three displayed parameters. The wheel also adjusts K1, with fine increments on continuous parameters when a shifted wheel event reaches the page. A hollow mark under a value shows where its physical pot sits before pickup. [One kick captured in Melodee](docs/orbital-hit.gif)
+
+The interface uses Departure Mono by Helena Zhang. [Font license](licenses/OFL-departure-mono.txt)
+
 ## Pages
 
-Melodee's Edit page shows a plug-in's parameters three at a time on K1-K3. MoonBass's 42 are 14 full pages, each one
-section (the CLAP module path names it).
+MoonBass groups its 42 parameters into 14 pages. On page 4 the third slot shows the Play button, operated by pressing the encoder.
 
 | Page | Section | K1 | K2 | K3 |
 |---|---|---|---|---|
@@ -199,12 +208,12 @@ One voice at the host's rate. Instructions a 128-frame block takes, from `tools/
 |---|---|---|
 | Everything busy (a hit every 13 ms with the longest gate, so the attack never rests: both metal noises, both LFOs, Harmonics, Compression) | about 70,000 | 1.5 % |
 | The default kick on every beat at 120 BPM | about 23,000 | 0.5 % |
-| Stopped | under 500 | 0.01 % |
+| Stopped | about 530 | 0.01 % |
 
 The attack section only runs for the gate and the moment after it. Once a kick has died away nothing runs at all:
 the LFOs' places are worked out from the time, so they need no ticking over. With Compression at 0 the VCA needs no
 division (a division is about 10 of the A55's cycles, more than its one instruction suggests), and the EQ's
-coefficient is only worked out while the EQ is moving. The build is 134 KB stripped.
+coefficient is only worked out while the EQ is moving. The build with Orbital Impact is 195 KiB stripped.
 
 ## Build and test
 
@@ -216,10 +225,11 @@ Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `mel
 tools/bench.sh      # instruction counts (Melodee's melodee-profiler image)
 ```
 
-The tests load the plug-in through the CLAP API and check (about 401,000 checks):
+The tests load the plug-in through the CLAP API and check (about 403,000 checks):
 - the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
+- the screen’s 14 sets of knob bindings, pitch and amp graphs, pot pickup, host edits, audition wakeup, expiry of old presses, hit animation and idle redraws;
 - state save and load (and another version's state);
 - the presets, as preset discovery lists them and preset-load loads them;
 - hits landing on their frame at 44.1, 48 and 96 kHz and block sizes 1, 37, 128 and 4096;

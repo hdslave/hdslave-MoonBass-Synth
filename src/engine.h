@@ -433,7 +433,10 @@ public:
         }
     }
 
+    uint32_t hitCount() const { return hits; }
+
 private:
+    uint32_t hits = 0; // screen notification; counts only kicks that pass the note filter
     enum Smoothed { pitchKnobS, harmonicsS, eqKnobS, compressionS, gainS, lfo1IntS, lfo2IntS, smoothed };
     enum LfoParam { lfoWaveOf, lfoSpeedOf, lfoIntOf, lfoDestOf, lfoModeOf, lfoClockOf };
     static uint32_t lfoId (int which, LfoParam p) { return (which == 0 ? ParamId::lfo1Wave : ParamId::lfo2Wave) + (uint32_t) p; }
@@ -513,6 +516,7 @@ private:
 
     void trigger (float velocity, float keyOctaves)
     {
+        ++hits;
         if (dirty)
             retarget();
         const bool wasSilent = ! sounding;
