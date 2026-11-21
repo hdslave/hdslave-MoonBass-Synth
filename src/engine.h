@@ -300,6 +300,7 @@ public:
         sounding = false;
         metal.restart();
         now = 0;
+        hitFrame = -1;
         for (auto& l : lfo)
             l = Lfo {};
         playing = false;
@@ -330,15 +331,16 @@ public:
     void press (uint32_t id)
     {
         if (id == ParamId::play)
-            hitKey = -1, trigger (1.0f, 0.0f); // the panel's Play: full velocity, the pitch as set
+            trigger (1.0f, 0.0f, -1); // the panel's Play: full velocity, the pitch as set
     }
 
-    // All sound off (MIDI CC 120, or a choke): the kick stops on this frame.
+    // All sound off (MIDI CC 120, or a choke): the kick stops on this frame (a hit after it on the frame plays).
     void silence()
     {
         sounding = attacking = false;
         vcaEnv = pitchEnv = gate = coupling = eqState = 0.0f;
         gateLeft = 0;
+        hitFrame = -1;
     }
     // A choke stops the hit its key played (key -1: whatever plays).
     void choke (int key)
@@ -357,8 +359,7 @@ public:
         const int n = split == 0 ? 0 : key - range.low;
         const float octaves = knob[ParamId::pitchMode] >= 0.5f ? (float) n / 12.0f
                                                                 : std::log2 (1.0f + (float) n * linearKeyStep); // a semitone at the bottom, then equal Hz
-        hitKey = key;
-        trigger (clampf (velocity, 0.0f, 1.0f), octaves);
+        trigger (clampf (velocity, 0.0f, 1.0f), octaves, key);
     }
 
     // The host's transport for the block about to play: where the song is (beats) and its tempo. The LFOs whose
@@ -436,7 +437,7 @@ public:
     uint32_t hitCount() const { return hits; }
 
 private:
-    uint32_t hits = 0; // screen notification; counts only kicks that pass the note filter
+    uint32_t hits = 0; // screen notification; counts only kicks that pass the note filter, one a frame
     enum Smoothed { pitchKnobS, harmonicsS, eqKnobS, compressionS, gainS, lfo1IntS, lfo2IntS, smoothed };
     enum LfoParam { lfoWaveOf, lfoSpeedOf, lfoIntOf, lfoDestOf, lfoModeOf, lfoClockOf };
     static uint32_t lfoId (int which, LfoParam p) { return (which == 0 ? ParamId::lfo1Wave : ParamId::lfo2Wave) + (uint32_t) p; }
@@ -514,12 +515,37 @@ private:
         lfo[i].anchor (now, cycles - std::floor (cycles));
     }
 
-    void trigger (float velocity, float keyOctaves)
+    // A hit's level: velocity as far as Dynamics lets it, the Accent CV, and how much a gate `ms` long charged the
+    // envelope (a short gate puts less energy into it).
+    float levelOf (float velocity, float ms) const
     {
-        ++hits;
+        const float dynamics = knob[ParamId::dynamics];
+        const float accent = clampf (1.0f + cv[CvDest::accent], 0.0f, 2.0f);
+        const float charge = 0.6f + 0.4f * (1.0f - std::exp (-ms / 2.0f));
+        return (1.0f - dynamics * (1.0f - velocity)) * accent * charge;
+    }
+
+    // A hit, from a note (its key) or Play (-1). Two on one frame (pads struck together, a pad over the sequence: a
+    // host may give all of a block's notes its first frame) are one hit: the louder plays as if the other had not come,
+    // its key, pitch, gate and level with it (equal, the later); nothing of the softer is taken.
+    void trigger (float velocity, float keyOctaves, int key)
+    {
+        const float ms = gateMs (knob[ParamId::gateTime]);
+        if (now == hitFrame)
+        {
+            if (dirty)
+                sumCvs(); // the Accent CV as it is now (retarget() works it out again)
+            if (levelOf (velocity, ms) < hitLevel)
+                return;
+            for (int i = 0; i < 2; ++i) // the LFOs as the hit it replaces found them: this one retriggers its own
+                if (retriggered & (1u << i))
+                    lfo[i] = lfoBefore[i];
+        }
+        else
+            ++hits, hitFrame = now, hitWasSilent = ! sounding; // the screen counts one hit a frame
         if (dirty)
             retarget();
-        const bool wasSilent = ! sounding;
+        hitKey = key;
         // What the hit takes as it is now.
         hitTune = withCv (ParamId::tune, CvDest::tune) * tuneOctavesMax;
         vcaFall = std::exp (-ln1000 / (decaySeconds (withCv (ParamId::decay, CvDest::decay)) * (float) rate));
@@ -529,14 +555,8 @@ private:
         metal1 = (int) std::lrint (clampf (knob[ParamId::metalNoise1] + cv[CvDest::metal1] * (float) metalPatterns, 0.0f, (float) metalPatterns));
         metal2 = (int) std::lrint (clampf (knob[ParamId::metalNoise2] + cv[CvDest::metal2] * (float) metalPatterns, 0.0f, (float) metalPatterns));
         metal2Bits = MetalNoise::selection (metal2, (int) clampf (knob[ParamId::noise2Mask], 1.0f, 16.0f));
-        const float ms = gateMs (knob[ParamId::gateTime]);
         gateLeft = std::max<int32_t> (1, (int32_t) std::lrint (ms * 0.001 * rate));
-        // The level: velocity as far as Dynamics lets it, the Accent CV, and how much the gate charged the envelope
-        // (a short gate puts less energy into it).
-        const float dynamics = knob[ParamId::dynamics];
-        const float accent = clampf (1.0f + cv[CvDest::accent], 0.0f, 2.0f);
-        const float charge = 0.6f + 0.4f * (1.0f - std::exp (-ms / 2.0f));
-        hitLevel = (1.0f - dynamics * (1.0f - velocity)) * accent * charge;
+        hitLevel = levelOf (velocity, ms);
         keyOct = keyOctaves;
 
         phase = 0.0f;
@@ -546,10 +566,11 @@ private:
             metal.restartEdges();
         attacking = true;
         sounding = true;
+        retriggered = 0;
         for (int i = 0; i < 2; ++i)
             if ((int) knob[lfoId (i, lfoModeOf)] != 0)
-                lfo[i].anchor (now, 0.0);
-        if (wasSilent) // nothing was sounding: the knobs are where they are, from the hit's first frame
+                lfoBefore[i] = lfo[i], retriggered |= 1u << i, lfo[i].anchor (now, 0.0);
+        if (hitWasSilent) // nothing was sounding: the knobs are where they are, from the hit's first frame
         {
             for (int k = 0; k < smoothed; ++k)
                 smooth[k] = target[k];
@@ -647,6 +668,10 @@ private:
     uint32_t metal2Bits = 0;
     int hitKey = -1; // the key that played the hit (-1: Play), for a choke
     int32_t gateLeft = 0;
+    int64_t hitFrame = -1;       // the frame the hit started on (-1: none since a silence), for another on it
+    bool hitWasSilent = false;   // nothing sounded before it
+    uint32_t retriggered = 0;    // the LFOs it retriggered (bit i: LFO i + 1), and their places before
+    Lfo lfoBefore[2];
 
     // The voice.
     float phase = 0.0f, pitchEnv = 0.0f, vcaEnv = 0.0f;

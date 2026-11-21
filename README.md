@@ -101,6 +101,11 @@ A note plays the kick if Split Mode takes its key. A note off does nothing: Gate
 velocity as far as Dynamics lets it, times the Accent CV, times the gate's charge (a short gate puts less into the
 envelope). A new hit restarts the VCO's phase and the envelopes over whatever still sounds, as one voice does.
 
+Two hits on one frame are one hit: the louder plays as if it had come alone, its key, pitch and level with it (equal,
+the later). Melodee gives all of a block's MIDI its first frame, so two pads struck together, a pad over the sequence
+or a 35 and 36 pair land on one frame; a ghost note there no longer takes the accent's level, or (with a Split Mode)
+its pitch. A frame apart, both play.
+
 A choke stops the hit its key played, on its frame (a choke of any key, -1, stops whatever plays), and so does MIDI's
 All Sound Off (CC 120 at 0). Melodee sends both when it silences a track.
 
@@ -225,7 +230,7 @@ Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `mel
 tools/bench.sh      # instruction counts (Melodee's melodee-profiler image)
 ```
 
-The tests load the plug-in through the CLAP API and check (about 403,000 checks):
+The tests load the plug-in through the CLAP API and check (about 465,000 checks):
 - the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
@@ -248,6 +253,8 @@ The tests load the plug-in through the CLAP API and check (about 403,000 checks)
 - which parameters a hit takes at its start and which move while it sounds;
 - each Split Mode's keys and Pitch Mode's steps;
 - Dynamics, MIDI notes and Play;
+- two hits on one frame, either order (the louder plays as if alone, to the bit, at block sizes 1-4096), and a frame
+  apart (both play);
 - chokes (the hit's own key, any key, another key's) and All Sound Off;
 - the LFOs:
   - Int 0 doing nothing;

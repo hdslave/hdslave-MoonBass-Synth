@@ -1,8 +1,9 @@
 // Loads MoonBass.clap as a host does and checks it: description and ports, every parameter and its page, state,
 // presets, hits landing on their frame, the same output whatever the block size, the sound's parts (Pitch, Tune,
 // Decay, Compression, Harmonics, the attack and both metal noises, EQ), what a hit takes as it is at the hit, Split
-// Mode and Pitch Mode, Dynamics, the LFOs (free, retriggered, one shot, in step with the song), the CV inputs, the
-// MIDI controller map, Play, and bounded output at random and extreme settings. Writes demo renders as WAV files.
+// Mode and Pitch Mode, Dynamics, two hits on one frame, the LFOs (free, retriggered, one shot, in step with the song),
+// the CV inputs, the MIDI controller map, Play, and bounded output at random and extreme settings. Writes demo renders
+// as WAV files.
 //   host MoonBass.clap OUT_FOLDER
 #include "wav.h"
 #include "../src/melodee_screen.h"
@@ -891,6 +892,85 @@ void testDynamicsAndPlay()
     CHECK (a.value ("Play") == 0.0);
 }
 
+// Two hits on one frame (two pads struck together, a pad over the sequence: Melodee gives all of a block's MIDI its
+// first frame) are one hit: the louder plays as if it had come alone, its key, pitch and level with it, whichever came
+// first (equal, the later). A frame apart, both play.
+void testSameFrame()
+{
+    // A step on a frame, in order: a note (velocity > 0), a choke (velocity 0) or a parameter's value.
+    struct Step { uint64_t frame; int key; double velocity; const char* param = nullptr; double value = 0.0; };
+    auto hit = [] (uint64_t f, double velocity, int key = 36) { return Step { f, key, velocity }; };
+    auto choke = [] (uint64_t f, int key) { return Step { f, key, 0.0 }; };
+    auto set = [] (uint64_t f, const char* name, double v) { return Step { f, 0, 0.0, name, v }; };
+    auto run = [] (const Settings& s, const std::vector<Step>& steps, uint32_t block) {
+        Instance a;
+        a.setup (s);
+        std::vector<float> l, r;
+        a.render (9600, block, l, r, [] (uint64_t at) { return Transport { true, 120.0, (double) at * 2.0 / 48000.0 }; },
+                  [&] (uint64_t at, uint32_t n, Events& e) {
+                      for (const auto& st : steps)
+                          if (st.frame >= at && st.frame < at + n)
+                          {
+                              const uint32_t t = (uint32_t) (st.frame - at);
+                              if (st.param)
+                                  e.param (t, a.id (st.param), st.value);
+                              else
+                                  e.note (t, st.velocity > 0.0 ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_CHOKE, (int16_t) st.key, st.velocity);
+                          }
+                  });
+        return l;
+    };
+    auto with = [] (std::vector<Step> a, const std::vector<Step>& b) { a.insert (a.end(), b.begin(), b.end()); return a; };
+
+    // A busy patch: the attack and a metal noise, LFO 1 retriggered on Pitch, LFO 2 a One Shot on the metal noise, the
+    // Accent CV. The pair lands on frame 2560 (a block's first at 128), from silence and over a kick still sounding.
+    const Settings busy { { "Noise", 0.6 }, { "Attack", 0.7 }, { "Gate Time", 0.6 }, { "Metal Noise 1", 300 }, { "LFO 1 Int", 0.3 },
+                          { "LFO 2 Int", 0.2 }, { "LFO 2 Mode", 2 }, { "LFO 2 Dest", 1 }, { "CV 1 Dest", 16 }, { "CV 1 Amt", 60 },
+                          { "CV 1 In", 2.5 } };
+    Settings split = busy;
+    split.push_back ({ "Split Mode", 2 }); // C1-C2 in semitones: C2 an octave up
+    constexpr uint64_t f = 2560;
+    for (const std::vector<Step>& before : { std::vector<Step> {}, std::vector<Step> { hit (0, 0.8) } })
+    {
+        const auto loud = run (busy, with (before, { hit (f, 1.0) }), 128);
+        // The ghost after the accent, or before it: the accent alone, whatever the block size (1: a block a frame).
+        for (uint32_t block : { 1u, 37u, 128u, 4096u })
+        {
+            CHECK (same (loud, run (busy, with (before, { hit (f, 1.0), hit (f, 0.3) }), block)));
+            CHECK (same (loud, run (busy, with (before, { hit (f, 0.3), hit (f, 1.0) }), block)));
+        }
+        for (uint32_t block : { 37u, 128u, 4096u })
+        {
+            auto play = [&] (const Settings& s, const std::vector<Step>& steps) { return run (s, with (before, steps), block); };
+            CHECK (same (loud, play (busy, { hit (f, 0.3), set (f, "Play", 1.0), hit (f, 0.5) }))); // Play: full velocity
+            // The ghost's key: neither its pitch nor a choke of it.
+            const auto low = play (split, { hit (f, 1.0, 36) });
+            CHECK (same (low, play (split, { hit (f, 1.0, 36), hit (f, 0.3, 48) })));
+            CHECK (same (low, play (split, { hit (f, 0.3, 48), hit (f, 1.0, 36) })));
+            CHECK (same (play (split, { hit (f, 1.0, 48) }), play (split, { hit (f, 1.0, 36), hit (f, 1.0, 48) }))); // equal: the later
+            CHECK (same (loud, play (busy, { hit (f, 1.0, 40), hit (f, 0.3, 41), choke (f + 2000, 41) })));
+            CHECK (same (loud, play (busy, { hit (f, 0.3, 41), hit (f, 1.0, 40), choke (f + 2000, 41) })));
+            // A knob moved between the two: the louder takes the knobs as they are at it, as if the softer had not come
+            // (nothing of the softer stays: not its LFO retrigger); a hit the Accent CV left softer is the one left out.
+            CHECK (same (play (busy, { set (f, "Pitch", 0.9), hit (f, 1.0) }), play (busy, { hit (f, 0.3), set (f, "Pitch", 0.9), hit (f, 1.0) })));
+            CHECK (same (play (busy, { set (f, "LFO 1 Mode", 0), hit (f, 1.0) }), play (busy, { hit (f, 0.3), set (f, "LFO 1 Mode", 0), hit (f, 1.0) })));
+            CHECK (same (play (busy, { hit (f, 1.0), set (f, "CV 1 In", 0.0) }), play (busy, { hit (f, 1.0), set (f, "CV 1 In", 0.0), hit (f, 1.0) })));
+            // A choke between them: the hit after it plays.
+            CHECK (same (play (busy, { choke (f, -1), hit (f, 0.3) }), play (busy, { hit (f, 1.0), choke (f, -1), hit (f, 0.3) })));
+        }
+    }
+    // A frame apart (across a block's edge at 128), both play: the second restarts the kick at its own level.
+    const Settings plain = clean ({ { "Pitch", 1.0 } });
+    const auto one = run (plain, { hit (f, 1.0) }, 128);
+    const auto loudThenGhost = run (plain, { hit (f - 1, 1.0), hit (f, 0.3) }, 128);
+    const auto ghostThenLoud = run (plain, { hit (f - 1, 0.3), hit (f, 1.0) }, 128);
+    CHECK (loudThenGhost[f - 1] != 0.0f && ghostThenLoud[f - 1] != 0.0f);
+    CHECK_NEAR (peak (loudThenGhost, f, 9600) / peak (one, f, 9600), 0.3, 0.01);
+    CHECK_NEAR (peak (ghostThenLoud, f, 9600) / peak (one, f, 9600), 1.0, 0.01);
+    for (uint32_t block : { 1u, 37u, 4096u })
+        CHECK (same (loudThenGhost, run (plain, { hit (f - 1, 1.0), hit (f, 0.3) }, block))); // whatever the block size
+}
+
 // A choke (Melodee's all sound off, a cut group) stops the hit its key played, on its frame; another key's does not.
 void testChoke()
 {
@@ -1307,6 +1387,7 @@ int main (int argc, char** argv)
     testTakenAtTheHit();
     testSplitAndPitchMode();
     testDynamicsAndPlay();
+    testSameFrame();
     testChoke();
     testLfos();
     testCvs();
