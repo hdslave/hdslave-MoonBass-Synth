@@ -64,10 +64,10 @@ gives units where the manuals give them.
 | Play | Play button | Play button | plays the kick at full velocity, at Pitch |
 | Metal Noise 1 | MetNze (menu): 000 noise, 001-255 patterns | Metal Noise 1 (orange): off, noi, 2-499 | Off / Noise (white) / 2 – 499: metallic patterns, each number its own sound |
 | Metal Noise 2 | — | Metal Noise 2 (red): off-499 | Off / 1 – 499: a more periodic, tone-like pattern; it adds to Metal Noise 1 |
-| Noise 2 Mask | — | Bit Mask 2 (red, blinking): M01-M16 | M01 – M16: low, very high pitched; high, long periodic patterns. A number with no bit inside the mask is silent |
+| Noise 2 Mask | — | Bit Mask 2 (red, blinking): M01-M16 | M01 – M16: low, very high pitched; high, long periodic patterns. Up to M09 a number with no bit inside the mask is silent; from M10 each mask is slower again (M16: patterns up to 3.3 s long) |
 | LFO 1 Wave | LFO Wave (menu): 8 waves | LFO 1 Wave (knob 5, 2nd function): 16 | Saw Up, Saw Down, Sine, Sine -, Triangle, Triangle -, Square, Square -, Pulse 60/70/80/88/40/30/20/12 (the % of a cycle on top) |
 | LFO 1 Speed | LFO Speed (menu): 041-290 BPM | LFO 1 Speed (knob 6, 2nd function) | 0.1 – 40 Hz, while Clock is Free |
-| LFO 1 Int | LFO Int (menu) | LFO 1 Int (knob 7, 2nd function) | 0 – 100 %: up to ±2 octaves on Pitch, or ±128 patterns on Metal Noise 1. 0 turns it off |
+| LFO 1 Int | LFO Int (menu) | LFO 1 Int (knob 7, 2nd function) | 0 – 100 %: up to ±2 octaves on Pitch, or ±128 patterns on Metal Noise 1 (it moves the number: from Noise into the patterns and back, never to Off). 0 turns it off |
 | LFO 1 Dest | — (pitch only) | LFO 1 Destination: LM1 / no1 | Pitch / Metal Noise 1 |
 | LFO 1 Mode | LFO Sync (FrE/SYn) + LFO One Shot (2nd function) | — (always restarts on the gate) | Free: runs on; Retrigger: starts again at each hit (a second pitch envelope); One Shot: one cycle from each hit, then holds where the cycle ends |
 | LFO 1 Clock | LFO Speed "Mid": MIDI clock | — | Free (Speed) / 2/1 … 1/32 with triplets: a cycle a note value at the host's tempo. With Mode Free it keeps in step with the song's beats (a cycle starts on each multiple from the top) |
@@ -92,6 +92,9 @@ A note plays the kick if Split Mode takes its key. A note off does nothing: Gate
 velocity as far as Dynamics lets it, times the Accent CV, times the gate's charge (a short gate puts less into the
 envelope). A new hit restarts the VCO's phase and the envelopes over whatever still sounds, as one voice does.
 
+A choke stops the hit its key played, on its frame (a choke of any key, -1, stops whatever plays), and so does MIDI's
+All Sound Off (CC 120 at 0). Melodee sends both when it silences a track.
+
 - **Any Note** (the default) suits a drum track: every pad plays the kick as set.
 - **C1-C2** with **Linear** is the ModBase 09's way: the eight pads of a Melodee drum track (notes 36-43) play eight
   tunings of one kick.
@@ -112,18 +115,23 @@ parameter as turning it would, and MoonBass tells the host the new value.
 | CC | Parameter | | CC | Parameter |
 |---|---|---|---|---|
 | 100 | Tune | | 114 | Gate Time |
-| 101 | Pitch | | 115 | Metal Noise 1 (0-127 over 0-499) |
-| 102 | Decay | | 116 | Metal Noise 2 (0-127 over 0-499) |
+| 101 | Pitch | | 115 | Metal Noise 1 (0 Off, 1 Noise, 2-127 over 2-499) |
+| 102 | Decay | | 116 | Metal Noise 2 (0 Off, 1-127 over 1-499) |
 | 103 | Harmonics | | 117 | Volume |
 | 104 | Pulse | | 119 | LFO 1 Wave (0-15) |
-| 105 | Noise | | 120 | Noise 2 Mask (0-15: M01-M16) |
-| 106 | Attack | | 121 | LFO 1 Int |
+| 105 | Noise | | 120 | Noise 2 Mask (1-15: M02-M16) |
+| 106 | Attack | | 121 | LFO 1 Int (1-127) |
 | 107 | EQ | | 122 | LFO 1 Speed |
-| 113 | Compression | | 123 | LFO 2 Wave (0-15) |
+| 113 | Compression | | 123 | LFO 2 Wave (1-15) |
 | | | | 124, 125 | LFO 2 Int, LFO 2 Speed |
 
 That is the ModBase 09's map. The MBase 11 shares 100-117 but uses 120 for LFO Sync and 123 for LFO One Shot. Those
 two are left to the ModBase 09's meaning.
+
+120, 121 and 123 at 0 are kept for what MIDI makes them: All Sound Off (it stops the kick), Reset All Controllers and
+All Notes Off (nothing to do). Hosts send them on stop and panic, and Melodee sends them on every channel when it
+silences a track, so they must never move a parameter. Through the map those three reach their values from 1 up
+(Noise 2 Mask M02 and above, LFO 1 Int from 1/127, LFO 2 Wave from Saw Down).
 
 ## Presets
 
@@ -160,9 +168,10 @@ Gate Time 0.1-16 ms, the MBase 11's LFO at 41-290 BPM). The rest is chosen to ma
 - The gate's charge: 60 % of the level at the shortest gate, rising to 100 % at 16 ms (85 % by 2 ms).
 - Metal noise: the manuals describe what the patterns are like, not how they are made. Metal Noise 1's numbers switch
   on, by their bits, nine square waves at unrelated frequencies (587 Hz – 7.95 kHz) combined by exclusive-or. Metal
-  Noise 2 is the parity of a 16-bit counter clocked at 20 kHz, ANDed with the number and the mask. Both behave as the
-  manual says (a number with no bit in the mask is silent; numbers differing only above it sound alike), but they are
-  not the hardware's patterns.
+  Noise 2 is the parity of a 16-bit counter clocked at 20 kHz, ANDed with the number and the mask; from M10 up, the
+  number (nine bits) moves into the mask's top bits, so every mask is its own sound and the wider ones reach the
+  counter's slower bits. Both behave as the manual says (with a small mask, a number with no bit in it is silent and
+  numbers differing only above it sound alike), but they are not the hardware's patterns.
 - LFOs: Speed 0.1-40 Hz; Int up to ±2 octaves, or ±128 patterns on Metal Noise 1. The manuals disagree on which way
   the square starts (MBase 11: from the top; ModBase 09: from the bottom); Square starts from the top, Square - from
   the bottom.
@@ -193,7 +202,9 @@ One voice at the host's rate. Instructions a 128-frame block takes, from `tools/
 | Stopped | under 500 | 0.01 % |
 
 The attack section only runs for the gate and the moment after it. Once a kick has died away nothing runs at all:
-the LFOs' places are worked out from the time, so they need no ticking over. The build is 134 KB stripped.
+the LFOs' places are worked out from the time, so they need no ticking over. With Compression at 0 the VCA needs no
+division (a division is about 10 of the A55's cycles, more than its one instruction suggests), and the EQ's
+coefficient is only worked out while the EQ is moving. The build is 134 KB stripped.
 
 ## Build and test
 
@@ -205,14 +216,15 @@ Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `mel
 tools/bench.sh      # instruction counts (Melodee's melodee-profiler image)
 ```
 
-The tests load the plug-in through the CLAP API and check (about 395,000 checks):
-- the description and ports;
+The tests load the plug-in through the CLAP API and check (about 401,000 checks):
+- the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
 - state save and load (and another version's state);
 - the presets, as preset discovery lists them and preset-load loads them;
 - hits landing on their frame at 44.1, 48 and 96 kHz and block sizes 1, 37, 128 and 4096;
 - the same output to the bit whatever the block size, with knobs, controllers, LFOs, CVs and Play moving;
+- the host's reset giving the same output as a fresh instance;
 - the sound's parts:
   - Pitch's frequency at both ends;
   - Tune's sweep;
@@ -220,20 +232,23 @@ The tests load the plug-in through the CLAP API and check (about 395,000 checks)
   - Compression shortening the tail;
   - Harmonics' overtones;
   - EQ;
-  - the attack's parts and its length;
-  - the metal noises' rules (off, silent masks, numbers alike above the mask, M01's 10 kHz);
+  - the attack's parts, its length and the gate's, to the frame;
+  - the metal noises' rules (off, silent masks, numbers alike above the mask, M01's 10 kHz, M09-M16 each its own and
+    slower);
 - which parameters a hit takes at its start and which move while it sounds;
 - each Split Mode's keys and Pitch Mode's steps;
 - Dynamics, MIDI notes and Play;
+- chokes (the hit's own key, any key, another key's) and All Sound Off;
 - the LFOs:
   - Int 0 doing nothing;
   - a square's two pitches;
   - Retrigger against Free;
   - One Shot holding;
-  - a synced LFO changing on the beat, and lining up after a jump;
+  - a synced LFO changing on the beat, staying in step through a new tempo, and lining up after a jump;
   - LFO 2 on Metal Noise 1;
 - the CVs (each the same as turning its knob, adding, Accent, taken at the hit or not);
-- every MIDI controller in the map;
+- every MIDI controller in the map, and 120, 121 and 123 at 0 (as Melodee sends them) moving nothing;
+- tempos that are infinite, NaN, 0 or absurd: the output stays a number and the kick ends in silence;
 - finite, bounded output at 64 random and extreme settings, hit fast and slow.
 
 `tests/fingerprint.cpp` then renders 64 fixed scenarios:

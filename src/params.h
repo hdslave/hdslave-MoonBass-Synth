@@ -13,7 +13,7 @@
 #include <strings.h>
 
 #ifndef MOONBASS_VERSION
-#define MOONBASS_VERSION "0.1.0"
+#define MOONBASS_VERSION "0.1.1"
 #endif
 
 namespace moonbass
@@ -54,9 +54,9 @@ struct Param
 
 // Pitch: the frequency the VCO settles on once the Tune envelope has gone, exponential, 10 Hz to 175 Hz.
 constexpr float pitchLowHz = 10.0f, pitchHighHz = 175.0f;
-inline float pitchOctaves (float k) { return k * std::log2 (pitchHighHz / pitchLowHz); } // above pitchLowHz
-inline float pitchHz (float k) { return pitchLowHz * std::exp2 (pitchOctaves (k)); }
-inline float pitchKnob (float hz) { return std::log2 (hz / pitchLowHz) / std::log2 (pitchHighHz / pitchLowHz); }
+constexpr float pitchSpanOctaves = 4.12928302f; // log2 (pitchHighHz / pitchLowHz): the knob's whole turn
+inline float pitchHz (float k) { return pitchLowHz * std::exp2 (k * pitchSpanOctaves); }
+inline float pitchKnob (float hz) { return std::log2 (hz / pitchLowHz) / pitchSpanOctaves; }
 
 // Tune: the pitch envelope's depth (attack 0, a fixed decay), up to 4 octaves above Pitch at the hit.
 constexpr float tuneOctavesMax = 4.0f;
@@ -69,6 +69,7 @@ inline float decayKnob (float s) { return std::log (s / decayShortest) / std::lo
 
 // EQ: a one-pole (6 dB an octave, "flat slope") low pass over everything: 0 open (20 kHz), 100 % closed (150 Hz).
 constexpr float eqOpenHz = 20000.0f, eqClosedHz = 150.0f;
+constexpr float eqSpanOctaves = -7.05889369f; // log2 (eqClosedHz / eqOpenHz)
 inline float eqHz (float k) { return eqOpenHz * std::pow (eqClosedHz / eqOpenHz, k); }
 inline float eqKnob (float hz) { return std::log (hz / eqOpenHz) / std::log (eqClosedHz / eqOpenHz); }
 
@@ -106,6 +107,7 @@ inline const char* const splitChoices[] = { "Any Note", "C1", "C1-C2", "C2-C3", 
 struct KeyRange { int16_t low, high; };
 inline constexpr KeyRange splitRanges[] = { { 0, 127 }, { 36, 36 }, { 36, 48 }, { 48, 60 }, { 60, 72 }, { 36, 96 }, { 36, 65 } };
 inline const char* const pitchModeChoices[] = { "Linear", "Semitones" };
+constexpr float linearKeyStep = 0.0594630944f; // Pitch Mode Linear: each key adds this much of the range's lowest pitch (2^(1/12) - 1)
 inline const char* const cvDestChoices[] = { "Off", "Tune", "Pitch", "Decay", "Harmonics", "Pulse", "Noise", "Attack", "EQ", "Compression",
                                              "Metal Noise 1", "Metal Noise 2", "LFO 1 Rate", "LFO 1 Int", "LFO 2 Rate", "LFO 2 Int", "Accent" };
 namespace CvDest
@@ -207,7 +209,7 @@ inline void formatParam (const Param& p, float v, char* text, uint32_t size)
 {
     v = clampParam (p, v);
     auto hz = [&] (float f) {
-        if (f < 1000.0f) std::snprintf (text, size, "%.1f Hz", f);
+        if (f < 999.95f) std::snprintf (text, size, "%.1f Hz", f); // rounds to under 1000.0 Hz
         else std::snprintf (text, size, "%.2f kHz", f / 1000.0f);
     };
     switch (p.unit)
@@ -218,7 +220,7 @@ inline void formatParam (const Param& p, float v, char* text, uint32_t size)
         case Unit::decay:
         {
             const float s = decaySeconds (v);
-            if (s < 1.0f) std::snprintf (text, size, "%.0f ms", s * 1000.0f);
+            if (s < 0.9995f) std::snprintf (text, size, "%.0f ms", s * 1000.0f); // rounds to under 1000 ms
             else std::snprintf (text, size, "%.2f s", s);
             break;
         }
@@ -226,13 +228,13 @@ inline void formatParam (const Param& p, float v, char* text, uint32_t size)
         case Unit::gateMs:
         {
             const float ms = gateMs (v);
-            std::snprintf (text, size, ms < 1.0f ? "%.2f ms" : "%.1f ms", ms);
+            std::snprintf (text, size, ms < 0.995f ? "%.2f ms" : "%.1f ms", ms);
             break;
         }
         case Unit::lfoHz:
         {
             const float f = lfoHz (v);
-            std::snprintf (text, size, f < 10.0f ? "%.2f Hz" : "%.1f Hz", f);
+            std::snprintf (text, size, f < 9.995f ? "%.2f Hz" : "%.1f Hz", f);
             break;
         }
         case Unit::volts: std::snprintf (text, size, "%.2f V", v); break;

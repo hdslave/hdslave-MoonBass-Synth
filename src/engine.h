@@ -119,10 +119,12 @@ struct Lfo
 // --- Metal noise ----------------------------------------------------------------------------------------------------
 // Metal Noise 1: Noise is white noise; 2-499 switch on, by the number's bits, nine square waves at unrelated high
 // frequencies, combined by exclusive-or (each bit pattern periodic, together aperiodic: metallic, noise-like).
-// Metal Noise 2: a 16-bit counter clocked at 20 kHz, its output the parity of (counter AND number AND mask), where
+// Metal Noise 2: a 16-bit counter clocked at 20 kHz, its output the parity of (counter AND the number's bits), where
 // Noise 2 Mask M01-M16 keeps that many of the counter's low bits: periodic, tone-like patterns, very high with a small
-// mask, long with a large one; a number with no bit inside the mask is silent. Each edge is band-limited (a
-// polynomial BLEP), so the output runs a frame behind the rest of the attack.
+// mask, long with a large one. The number has nine bits: up to M09 the mask cuts it (a number with no bit inside the
+// mask is silent; numbers differing only above it sound alike), from M10 it moves up into the mask's top bits, so
+// each wider mask reaches slower counter bits (M16: up to 2^16 ticks, 3.3 s). Each edge is band-limited (a polynomial
+// BLEP), so the output runs a frame behind the rest of the attack.
 constexpr float metalHz[9] = { 587.3f, 845.1f, 1173.7f, 1637.9f, 2245.6f, 3091.2f, 4216.4f, 5803.9f, 7951.3f };
 constexpr float metal2ClockHz = 20000.0f;
 
@@ -139,17 +141,28 @@ struct MetalNoise
 
     void prepare (float rate)
     {
+        // Held under half a cycle (and the counter under a tick) a frame, which only bites below 20 kHz.
         for (int i = 0; i < 9; ++i)
-            dt[i] = metalHz[i] / rate, phase[i] = 0.1f * (float) i;
-        clockDt = metal2ClockHz / rate;
+            dt[i] = std::min (metalHz[i] / rate, 0.45f);
+        clockDt = std::min (metal2ClockHz / rate, 1.0f);
+        restart();
+    }
+    // Where the generators start (activation, and the host's reset).
+    void restart()
+    {
         state = 0;
         for (int i = 0; i < 9; ++i)
+        {
+            phase[i] = 0.1f * (float) i;
             state |= (phase[i] >= 0.5f ? 1u : 0u) << i;
+        }
         clockPhase = 0.0f;
         counter = 0;
         noiseSeed = 0x2545f491u;
-        held1 = held2 = last1 = last2 = 0.0f;
+        restartEdges();
     }
+    // A new attack: the band-limiting starts afresh (the generators run on).
+    void restartEdges() { held1 = held2 = last1 = last2 = 0.0f; }
 
     static void blep (float h, float d, float& before, float& now)
     {
@@ -157,9 +170,16 @@ struct MetalNoise
         now -= 0.5f * h * (1.0f - d) * (1.0f - d);
     }
 
-    // One frame of both generators, summed; n1 is Metal Noise 1's number (0 Off, 1 Noise), n2 Metal Noise 2's (0 Off),
-    // maskBits the counter bits Noise 2 Mask keeps.
-    float next (int n1, int n2, uint32_t maskBits)
+    // The counter bits Metal Noise 2 reads, for its number (0 Off) and Noise 2 Mask (1-16).
+    static uint32_t selection (int number, int maskWidth)
+    {
+        const uint32_t bits = (1u << maskWidth) - 1u, n = (uint32_t) number;
+        return (maskWidth > 9 ? n << (maskWidth - 9) : n) & bits;
+    }
+
+    // One frame of both generators, summed; n1 is Metal Noise 1's number (0 Off, 1 Noise), sel the counter bits Metal
+    // Noise 2 reads (0: off or silent).
+    float next (int n1, uint32_t sel)
     {
         // Metal Noise 1.
         float before1 = 0.0f, now1 = 0.0f, naive1;
@@ -227,7 +247,6 @@ struct MetalNoise
 
         // Metal Noise 2.
         float before2 = 0.0f, now2 = 0.0f;
-        const uint32_t sel = (uint32_t) n2 & maskBits;
         float to = clockPhase + clockDt;
         float tickAgo = -1.0f;
         if (to >= 1.0f)
@@ -253,6 +272,7 @@ struct MetalNoise
 
 // --- Engine -------------------------------------------------------------------------------------------------------
 // A jump in the song's place larger than this (beats) is a jump; smaller is CLAP's rounding of the position.
+constexpr float ln1000 = 6.90775528f; // a fall of 60 dB in natural-log units: Decay's time
 constexpr double jumpSlack = 1.0e-3;
 
 class Engine
@@ -266,7 +286,6 @@ public:
         pitchFall = std::exp (-1.0f / (tuneDecaySeconds * r));
         gateRise = 1.0f - std::exp (-1.0f / (25.0e-6f * r));            // the gate's edges: about 25 us
         couplingHp = 1.0f - std::exp (-6.28318531f * 150.0f / r);        // the pulse's coupling high pass: 150 Hz
-        maxDt = 0.45f;
         metal.prepare (r);
         reset();
     }
@@ -279,8 +298,8 @@ public:
         gate = coupling = eqState = 0.0f;
         attacking = false;
         sounding = false;
+        metal.restart();
         now = 0;
-        tick = 0;
         for (auto& l : lfo)
             l = Lfo {};
         playing = false;
@@ -311,19 +330,34 @@ public:
     void press (uint32_t id)
     {
         if (id == ParamId::play)
-            trigger (1.0f, 0.0f); // the panel's Play: full velocity, the pitch as set
+            hitKey = -1, trigger (1.0f, 0.0f); // the panel's Play: full velocity, the pitch as set
+    }
+
+    // All sound off (MIDI CC 120, or a choke): the kick stops on this frame.
+    void silence()
+    {
+        sounding = attacking = false;
+        vcaEnv = pitchEnv = gate = coupling = eqState = 0.0f;
+        gateLeft = 0;
+    }
+    // A choke stops the hit its key played (key -1: whatever plays).
+    void choke (int key)
+    {
+        if (key < 0 || key == hitKey)
+            silence();
     }
 
     // A MIDI note: plays if Split Mode takes its key, the pitch counted from the range's lowest key.
     void note (int key, float velocity)
     {
-        const int split = (int) knob[ParamId::splitMode];
-        const KeyRange range = splitRanges[split < 0 ? 0 : (split > 6 ? 6 : split)];
+        const int split = std::min (std::max ((int) knob[ParamId::splitMode], 0), 6);
+        const KeyRange range = splitRanges[split];
         if (key < range.low || key > range.high)
             return;
         const int n = split == 0 ? 0 : key - range.low;
         const float octaves = knob[ParamId::pitchMode] >= 0.5f ? (float) n / 12.0f
-                                                                : std::log2 (1.0f + (float) n * 0.0594630944f); // a semitone at the bottom, then equal Hz
+                                                                : std::log2 (1.0f + (float) n * linearKeyStep); // a semitone at the bottom, then equal Hz
+        hitKey = key;
         trigger (clampf (velocity, 0.0f, 1.0f), octaves);
     }
 
@@ -339,10 +373,11 @@ public:
         // The song's place is counted on from Play, a jump or a new tempo, not from each block's (rounded) start, so
         // it is the same at a frame whatever the block size.
         if (started || (playing && newTempo))
+        {
             songBeats0 = beats, songT0 = now;
-        if (started)
-            for (int i = 0; i < 2; ++i)
+            for (int i = 0; i < 2; ++i) // a new tempo too: in step from this frame, not from the next tick
                 alignToSong (i);
+        }
         expectBeats = playing ? beats + (double) frames * bpm / 60.0 / rate : -1.0;
     }
 
@@ -364,11 +399,10 @@ public:
                 std::memset (left + i, 0, sizeof (float) * n);
                 if (right)
                     std::memset (right + i, 0, sizeof (float) * n);
-                tick += n;
                 now += n;
                 return;
             }
-            if ((tick++ & 7) == 0)
+            if ((now & 7) == 0) // every 8 frames of the time (not of the block), whatever the block size
             {
                 if (dirty)
                     retarget();
@@ -387,8 +421,8 @@ public:
                             smooth[k] = target[k];
                         moving = false;
                     }
+                    updateEq(); // only the eased EQ moves it
                 }
-                updateEq();
             }
             const float y = voice();
             left[i] = y;
@@ -400,12 +434,11 @@ public:
     }
 
 private:
-    enum Smoothed { pitchKnobS, harmonicsS, eqKnob, compressionS, gainS, lfo1IntS, lfo2IntS, smoothed };
+    enum Smoothed { pitchKnobS, harmonicsS, eqKnobS, compressionS, gainS, lfo1IntS, lfo2IntS, smoothed };
     enum LfoParam { lfoWaveOf, lfoSpeedOf, lfoIntOf, lfoDestOf, lfoModeOf, lfoClockOf };
     static uint32_t lfoId (int which, LfoParam p) { return (which == 0 ? ParamId::lfo1Wave : ParamId::lfo2Wave) + (uint32_t) p; }
 
-    static constexpr float eqOctaves = -7.05889369f; // log2 (eqClosedHz / eqOpenHz)
-    void updateEq() { eqGain = onePoleGain (std::min (exp2Fast (eqOctaves * smooth[eqKnob]) * eqOpenHz, 0.4f * (float) rate) * 3.14159265f * invRate); }
+    void updateEq() { eqGain = onePoleGain (std::min (exp2Fast (eqSpanOctaves * smooth[eqKnobS]) * eqOpenHz, 0.4f * (float) rate) * 3.14159265f * invRate); }
 
     // The CV inputs, summed into each destination: CV n In (0-5 V) times CV n Amt (-128..127, over 128), so 5 V at
     // +127 adds nearly the whole of the destination's range.
@@ -429,7 +462,7 @@ private:
         sumCvs();
         target[pitchKnobS] = withCv (ParamId::pitch, CvDest::pitch);
         target[harmonicsS] = withCv (ParamId::harmonics, CvDest::harmonics);
-        target[eqKnob] = withCv (ParamId::eq, CvDest::eq);
+        target[eqKnobS] = withCv (ParamId::eq, CvDest::eq);
         target[compressionS] = withCv (ParamId::compression, CvDest::compression);
         target[gainS] = knob[ParamId::volume] * knob[ParamId::volume];
         target[lfo1IntS] = withCv (ParamId::lfo1Int, CvDest::lfo1Int);
@@ -448,7 +481,7 @@ private:
                 l.anchor (now, at >= 1.0 ? 0.0 : at);
             }
             const double inc = clock == 0 ? (double) lfoHz (withCv (lfoId (i, lfoSpeedOf), i == 0 ? CvDest::lfo1Rate : CvDest::lfo2Rate)) / rate
-                                          : bpm / 60.0 / lfoClockBeats[clock] / rate;
+                                          : syncedInc (clock);
             l.setRate (now, inc);
             if (clock != lastClock[i] || mode != lastMode[i])
             {
@@ -461,6 +494,10 @@ private:
         moving = true;
     }
 
+    // Cycles a frame for a Clock that follows the tempo (one expression, so a rate set here and in retarget() is the
+    // same to the bit and setRate() sees no change).
+    double syncedInc (int clock) const { return bpm / 60.0 / lfoClockBeats[clock] / rate; }
+
     // An LFO whose Clock follows the tempo and whose Mode is Free sits where the song's beats put it, while the host
     // plays: a cycle starts on each multiple of its note value from the song's top.
     void alignToSong (int i)
@@ -470,7 +507,7 @@ private:
             return;
         const double beats = songBeats0 + (double) (now - songT0) * bpm / 60.0 / rate;
         const double cycles = beats / lfoClockBeats[clock];
-        lfo[i].inc = bpm / 60.0 / lfoClockBeats[clock] / rate; // the tempo's rate from here, if it just changed
+        lfo[i].inc = syncedInc (clock); // the tempo's rate from here, if it just changed
         lfo[i].anchor (now, cycles - std::floor (cycles));
     }
 
@@ -481,13 +518,13 @@ private:
         const bool wasSilent = ! sounding;
         // What the hit takes as it is now.
         hitTune = withCv (ParamId::tune, CvDest::tune) * tuneOctavesMax;
-        vcaFall = std::exp (-6.90775528f / (decaySeconds (withCv (ParamId::decay, CvDest::decay)) * (float) rate));
+        vcaFall = std::exp (-ln1000 / (decaySeconds (withCv (ParamId::decay, CvDest::decay)) * (float) rate));
         hitPulse = withCv (ParamId::pulse, CvDest::pulse);
         hitNoise = withCv (ParamId::noise, CvDest::noise);
         hitAttack = withCv (ParamId::attack, CvDest::attack);
         metal1 = (int) std::lrint (clampf (knob[ParamId::metalNoise1] + cv[CvDest::metal1] * (float) metalPatterns, 0.0f, (float) metalPatterns));
         metal2 = (int) std::lrint (clampf (knob[ParamId::metalNoise2] + cv[CvDest::metal2] * (float) metalPatterns, 0.0f, (float) metalPatterns));
-        maskBits = (1u << (uint32_t) clampf (knob[ParamId::noise2Mask], 1.0f, 16.0f)) - 1u;
+        metal2Bits = MetalNoise::selection (metal2, (int) clampf (knob[ParamId::noise2Mask], 1.0f, 16.0f));
         const float ms = gateMs (knob[ParamId::gateTime]);
         gateLeft = std::max<int32_t> (1, (int32_t) std::lrint (ms * 0.001 * rate));
         // The level: velocity as far as Dynamics lets it, the Accent CV, and how much the gate charged the envelope
@@ -501,8 +538,8 @@ private:
         phase = 0.0f;
         pitchEnv = 1.0f;
         vcaEnv = 1.0f;
-        if (! attacking) // a new attack: the noise's band-limiting starts afresh
-            metal.held1 = metal.held2 = metal.last1 = metal.last2 = 0.0f;
+        if (! attacking)
+            metal.restartEdges();
         attacking = true;
         sounding = true;
         for (int i = 0; i < 2; ++i)
@@ -532,7 +569,7 @@ private:
         }
 
         // The VCO: Pitch, the key, the Tune envelope and the LFOs, in octaves above pitchLowHz.
-        const float octaves = smooth[pitchKnobS] * 4.12928302f + keyOct + hitTune * pitchEnv + lfoPitch * lfoPitchOctaves;
+        const float octaves = smooth[pitchKnobS] * pitchSpanOctaves + keyOct + hitTune * pitchEnv + lfoPitch * lfoPitchOctaves;
         const float dt = std::min (exp2Fast (octaves) * pitchLowHz * invRate, maxDt);
         pitchEnv *= pitchFall;
         float p = phase + dt;
@@ -549,12 +586,17 @@ private:
 
         // The VCA: held at its peak for the gate, then Decay; Compression takes a threshold off the falling
         // envelope (the decay grows quieter and ends sooner; at the top only a click is left).
-        if (gateLeft > 0)
+        const bool gateOpen = gateLeft > 0; // this frame is one of the gate's (the attack below hears the same)
+        if (gateOpen)
             --gateLeft;
         else
             vcaEnv *= vcaFall;
-        const float cut = 0.9f * smooth[compressionS];
-        float amp = (vcaEnv - cut) / (1.0f - cut);
+        // Compression takes 0.9 x its value off the envelope and scales back up; at 0 (the usual) there is nothing to
+        // take, and no division. Both multiply-adds are fused, as the compiler fused them before this was spelled out.
+        const float squeeze = smooth[compressionS];
+        float amp = vcaEnv;
+        if (squeeze != 0.0f)
+            amp = std::fma (-0.9f, squeeze, vcaEnv) / std::fma (-0.9f, squeeze, 1.0f);
         if (amp <= 3.0e-5f)
             amp = 0.0f, vcaEnv = 0.0f;
         float y = body * amp * hitLevel;
@@ -562,12 +604,12 @@ private:
         // The attack: the gate's pulse and the noise during it, mixed by Attack.
         if (attacking)
         {
-            gate += ((gateLeft > 0 ? 1.0f : 0.0f) - gate) * gateRise;
+            gate += ((gateOpen ? 1.0f : 0.0f) - gate) * gateRise;
             coupling += (gate - coupling) * couplingHp;
             const int n1 = lfoMetal != 0.0f && metal1 >= 1
                                ? (int) std::lrint (clampf ((float) metal1 + lfoMetal * lfoMetalPatterns, 1.0f, (float) metalPatterns))
                                : metal1;
-            const float noise = metal.next (n1, metal2, maskBits);
+            const float noise = metal.next (n1, metal2Bits);
             y += hitAttack * (hitPulse * (gate - coupling) + hitNoise * noise * gate) * hitLevel;
             if (gateLeft == 0 && gate < 1.0e-6f && std::fabs (coupling) < 1.0e-6f)
                 attacking = false, gate = coupling = 0.0f;
@@ -579,12 +621,15 @@ private:
         eqState = lp + v;
         if (vcaEnv == 0.0f && ! attacking && std::fabs (eqState) < 1.0e-7f)
             sounding = false, eqState = 0.0f;
-        return tanhFast (1.5f * lp * smooth[gainS]);
+        // tanhFast tops out at exactly 1 (at 3); its multiply-adds can round a step past it there, so the last word
+        // is +-1 (two instructions; nothing inside the range moves).
+        return clampf (tanhFast (1.5f * lp * smooth[gainS]), -1.0f, 1.0f);
     }
 
     double rate = 48000.0;
     float invRate = 1.0f / 48000.0f;
-    float pitchFall = 0.0f, gateRise = 0.0f, couplingHp = 0.0f, maxDt = 0.45f;
+    float pitchFall = 0.0f, gateRise = 0.0f, couplingHp = 0.0f;
+    static constexpr float maxDt = 0.45f; // the VCO's step a frame at most: under Nyquist
 
     float knob[ParamId::count] {};
     float cv[CvDest::count] {};
@@ -595,7 +640,8 @@ private:
     // The hit.
     float hitTune = 0.0f, vcaFall = 0.0f, hitPulse = 0.0f, hitNoise = 0.0f, hitAttack = 0.0f, hitLevel = 0.0f, keyOct = 0.0f;
     int metal1 = 1, metal2 = 0;
-    uint32_t maskBits = 0xffu;
+    uint32_t metal2Bits = 0;
+    int hitKey = -1; // the key that played the hit (-1: Play), for a choke
     int32_t gateLeft = 0;
 
     // The voice.
@@ -606,7 +652,6 @@ private:
 
     // Time and the LFOs.
     int64_t now = 0;
-    uint32_t tick = 0;
     Lfo lfo[2];
     bool lfoDestMetal[2] {};
     int lastClock[2] { -1, -1 }, lastMode[2] { -1, -1 };

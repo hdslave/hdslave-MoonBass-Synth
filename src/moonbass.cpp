@@ -18,7 +18,7 @@ namespace moonbass
 namespace
 {
 const char* const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYNTHESIZER, CLAP_PLUGIN_FEATURE_DRUM,
-                                 CLAP_PLUGIN_FEATURE_MONO, nullptr };
+                                 CLAP_PLUGIN_FEATURE_STEREO, nullptr }; // one voice, a stereo port (the same both sides)
 
 const clap_plugin_descriptor descriptor {
     CLAP_VERSION, "com.hdslave.moonbass", "hdslave MoonBass", "hdslave", "", "", "", MOONBASS_VERSION,
@@ -108,9 +108,17 @@ void tellHost (const clap_output_events* out, uint32_t time, clap_id id, double 
 
 // The hardware's MIDI controller map (the ModBase 09's; the MBase 11 shares 100-117): a controller sets its parameter,
 // as turning it would, and the host is told. Any MIDI channel: the host's track is the channel.
+// 120, 121 and 123 at 0 are MIDI's All Sound Off, Reset All Controllers and All Notes Off, which hosts send on stop
+// and panic (Melodee does, on every channel): those stop the sound or do nothing, and never move a parameter.
 void controller (Plugin& p, uint32_t time, int number, int value, const clap_output_events* out)
 {
     using namespace ParamId;
+    if (value == 0 && (number == 120 || number == 121 || number == 123))
+    {
+        if (number == 120)
+            p.engine.silence();
+        return; // a note has no hold to let go of, and no controller here is MIDI's to reset
+    }
     uint32_t id = count;
     float v = (float) value / 127.0f;
     switch (number)
@@ -125,8 +133,9 @@ void controller (Plugin& p, uint32_t time, int number, int value, const clap_out
         case 107: id = eq; break;
         case 113: id = compression; break;
         case 114: id = gateTime; break;
-        case 115: id = metalNoise1, v = std::round ((float) value * (float) metalPatterns / 127.0f); break;
-        case 116: id = metalNoise2, v = std::round ((float) value * (float) metalPatterns / 127.0f); break;
+        // The metal noises: 0 Off, then (Metal Noise 1) 1 Noise, and the rest spread over the patterns to 499.
+        case 115: id = metalNoise1, v = value < 2 ? (float) value : 2.0f + std::round ((float) (value - 2) * (float) (metalPatterns - 2) / 125.0f); break;
+        case 116: id = metalNoise2, v = value < 1 ? 0.0f : 1.0f + std::round ((float) (value - 1) * (float) (metalPatterns - 1) / 126.0f); break;
         case 117: id = volume; break;
         case 119: id = lfo1Wave, v = (float) std::min (value, 15); break;
         case 120: id = noise2Mask, v = (float) (std::min (value, 15) + 1); break;
@@ -185,10 +194,16 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
                 p.engine.note (n->key, (float) n->velocity);
             break;
         }
+        case CLAP_EVENT_NOTE_CHOKE:
+        {
+            // A choke (Melodee's all sound off, a cut group) stops the hit its key played.
+            p.engine.choke (reinterpret_cast<const clap_event_note*> (e)->key);
+            break;
+        }
         case CLAP_EVENT_MIDI:
         {
             const auto* m = reinterpret_cast<const clap_event_midi*> (e);
-            if ((m->data[0] & 0xf0) == 0x90 && m->data[2] > 0)
+            if ((m->data[0] & 0xf0) == 0x90 && (m->data[2] & 0x7f) > 0)
                 p.engine.note (m->data[1] & 0x7f, (float) (m->data[2] & 0x7f) / 127.0f);
             else if ((m->data[0] & 0xf0) == 0xb0)
                 controller (p, e->time, m->data[1] & 0x7f, m->data[2] & 0x7f, out);
@@ -205,15 +220,20 @@ void paramsFlush (const clap_plugin* plugin, const clap_input_events* in, const 
     for (uint32_t i = 0; i < count; ++i)
     {
         const auto* e = in->get (in, i);
-        // Outside process the engine is not running: only values are kept (buttons do nothing).
+        // Outside process the engine is not running: only values are kept (buttons do nothing). Not active, the
+        // engine takes them now, as setAll() does; active, at the next block.
         if (e->space_id == CLAP_CORE_EVENT_SPACE_ID && e->type == CLAP_EVENT_PARAM_VALUE)
         {
             const auto* v = reinterpret_cast<const clap_event_param_value*> (e);
             const int index = paramIndex (v->param_id);
             if (index >= 0 && paramTable[index].kind != Kind::button)
             {
-                p.values[index].store (clampParam (paramTable[index], (float) v->value), std::memory_order_relaxed);
-                p.mainChanged.store (true, std::memory_order_release);
+                const float value = clampParam (paramTable[index], (float) v->value);
+                p.values[index].store (value, std::memory_order_relaxed);
+                if (p.active)
+                    p.mainChanged.store (true, std::memory_order_release);
+                else
+                    p.applied[index] = value, p.engine.set (paramTable[index].id, value);
             }
         }
     }
@@ -445,7 +465,10 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
     {
         const bool playing = (t->flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
         const bool placed = (t->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) != 0;
-        const double bpm = (t->flags & CLAP_TRANSPORT_HAS_TEMPO) && t->tempo > 0.0 ? t->tempo : 120.0;
+        // A tempo that is no number, or none, is 120; the rest is held to 1-1000 BPM (an infinite one would make the
+        // synced LFOs' places NaN, and the EQ would keep it).
+        const bool tempo = (t->flags & CLAP_TRANSPORT_HAS_TEMPO) && std::isfinite (t->tempo) && t->tempo > 0.0;
+        const double bpm = tempo ? std::min (std::max (t->tempo, 1.0), 1000.0) : 120.0;
         const double beats = placed ? (double) t->song_pos_beats / (double) CLAP_BEATTIME_FACTOR : 0.0;
         p.engine.transport (playing, placed, beats, bpm, frames);
     }

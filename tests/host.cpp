@@ -346,6 +346,10 @@ void testDescription()
     for (const char* const* f = d->features; f && *f; ++f)
         instrument |= std::strcmp (*f, CLAP_PLUGIN_FEATURE_INSTRUMENT) == 0, drum |= std::strcmp (*f, CLAP_PLUGIN_FEATURE_DRUM) == 0;
     CHECK (instrument && drum);
+    bool stereo = false, mono = false; // the audio port is stereo (the same both sides); "mono" is an audio feature in CLAP
+    for (const char* const* f = d->features; f && *f; ++f)
+        stereo |= std::strcmp (*f, CLAP_PLUGIN_FEATURE_STEREO) == 0, mono |= std::strcmp (*f, CLAP_PLUGIN_FEATURE_MONO) == 0;
+    CHECK (stereo && ! mono);
 
     Instance a;
     const auto* audio = static_cast<const clap_plugin_audio_ports*> (a.plugin->get_extension (a.plugin, CLAP_EXT_AUDIO_PORTS));
@@ -594,6 +598,23 @@ void testTiming()
             CHECK (peak (x, 0, 1000) == 0.0f);
             CHECK (std::fabs (x[7777]) > 0.0f && std::fabs (x[30001]) > 0.0f);
         }
+    // The host's reset starts everything again, the noise generators too: the same events then play as from a fresh
+    // instance.
+    {
+        const Settings noisy { { "Noise", 1.0 }, { "Attack", 1.0 }, { "Gate Time", 1.0 }, { "Metal Noise 1", 300 }, { "Metal Noise 2", 41 },
+                               { "LFO 1 Int", 0.3 }, { "LFO 1 Mode", 0 }, { "LFO 2 Int", 0.2 }, { "LFO 2 Clock", 6 } };
+        const std::vector<Hit> hits { { 100 }, { 5000 }, { 9000, 44 } };
+        const auto playing = [] (uint64_t at) { return Transport { true, 132.0, 1.0 + (double) at * 2.2 / 48000.0 }; };
+        Instance fresh;
+        fresh.setup (noisy);
+        const auto first = fresh.play (hits, 0.5, 128, playing);
+        Instance used;
+        used.setup (noisy);
+        used.play ({ { 0 }, { 333, 50 }, { 7000 } }, 0.4, 128, playing);
+        used.plugin->reset (used.plugin);
+        used.setup ({});
+        CHECK (same (first, used.play (hits, 0.5, 128, playing)));
+    }
     // The kick dies away to exact silence, and plays again after it.
     {
         const auto x = kick ({ { "Decay", 0.0 } }, { { 0 }, { 40000 } }, 1.0);
@@ -719,6 +740,16 @@ void testAttack()
     const size_t end = (size_t) ((gate + 0.001) * 48000);
     CHECK (energy (diff, end, diff.size()) < 1e-6 * energy (diff, 0, end));
     CHECK (energy (diff, (size_t) (0.5 * gate * 48000), (size_t) (gate * 48000)) > 0.2 * energy (diff, 0, (size_t) (0.5 * gate * 48000)));
+    // The gate is open for Gate Time to the frame (the VCA is held as long): the click's fall starts on the first
+    // frame after it (before, the pulse only sinks slowly through its coupling high pass).
+    for (auto [rate, knob] : { std::pair { 48000.0, 0.0 }, std::pair { 48000.0, 0.3 }, std::pair { 44100.0, 0.5 }, std::pair { 96000.0, 0.2 } })
+    {
+        const Settings click { { "Attack", 1.0 }, { "Pulse", 1.0 }, { "Noise", 0.0 }, { "EQ", 0.0 }, { "Pitch", 0.0 }, { "Tune", 0.0 },
+                               { "Volume", 0.3 }, { "Gate Time", knob } };
+        const auto x = kick (click, { { 0 } }, 0.05, rate);
+        const size_t open = (size_t) std::lrint (0.1 * std::pow (160.0, knob) * 0.001 * rate);
+        CHECK (x[open - 2] - x[open - 1] < 0.1f * (x[open - 1] - x[open]));
+    }
     // A short gate puts less into the envelope: quieter, as on the hardware.
     const auto shortGate = kick (clean ({ { "Pitch", 1.0 }, { "Gate Time", 0.0 } }), { { 0 } }, 0.3);
     const auto longGate = kick (clean ({ { "Pitch", 1.0 }, { "Gate Time", 1.0 } }), { { 0 } }, 0.3);
@@ -738,6 +769,17 @@ void testMetalNoise()
                  with ({ { "Metal Noise 1", 0 }, { "Metal Noise 2", 5 + 256 }, { "Noise 2 Mask", 8 } })));
     CHECK (! same (with ({ { "Metal Noise 1", 0 }, { "Metal Noise 2", 5 }, { "Noise 2 Mask", 8 } }),
                    with ({ { "Metal Noise 1", 0 }, { "Metal Noise 2", 5 + 256 }, { "Noise 2 Mask", 9 } })));
+    // From M09 up every mask is its own sound, and the wider the mask the slower the pattern (fewer edges).
+    {
+        std::vector<std::vector<float>> masks;
+        for (int m = 9; m <= 16; ++m)
+            masks.push_back (with ({ { "Metal Noise 1", 0 }, { "Metal Noise 2", 77 }, { "Noise 2 Mask", (double) m } }));
+        for (size_t i = 0; i < masks.size(); ++i)
+            for (size_t j = i + 1; j < masks.size(); ++j)
+                CHECK (! same (masks[i], masks[j]));
+        auto edges = [&] (const std::vector<float>& x) { std::vector<float> d (x.size()); for (size_t i = 0; i < x.size(); ++i) d[i] = x[i] - quiet[i]; return brightness (d, 0, 760); };
+        CHECK (edges (masks.back()) < 0.5 * edges (masks.front()));
+    }
     // M01 with an odd number: the counter's lowest bit, a 10 kHz square.
     const auto m01 = with ({ { "Metal Noise 1", 0 }, { "Metal Noise 2", 1 }, { "Noise 2 Mask", 1 }, { "Tune", 0.0 }, { "Pitch", 0.0 } });
     CHECK (amplitudeAt (m01, 48000, 10000.0, 48, 720) > 10.0 * amplitudeAt (m01, 48000, 7000.0, 48, 720));
@@ -843,6 +885,36 @@ void testDynamicsAndPlay()
     CHECK (a.value ("Play") == 0.0);
 }
 
+// A choke (Melodee's all sound off, a cut group) stops the hit its key played, on its frame; another key's does not.
+void testChoke()
+{
+    const Settings base = clean ({ { "Pitch", 1.0 } });
+    auto run = [&] (int playKey, int chokeKey, bool play = false) {
+        Instance a;
+        a.setup (base);
+        std::vector<float> l, r;
+        a.render (24000, 128, l, r, stopped, [&] (uint64_t at, uint32_t n, Events& e) {
+            if (at == 0)
+            {
+                if (play) e.param (0, a.id ("Play"), 1.0);
+                else e.note (0, CLAP_EVENT_NOTE_ON, (int16_t) playKey, 1.0);
+            }
+            if (4803 >= at && 4803 < at + n)
+                e.note ((uint32_t) (4803 - at), CLAP_EVENT_NOTE_CHOKE, (int16_t) chokeKey, 0.0);
+        });
+        return l;
+    };
+    const auto plain = run (40, 99);
+    CHECK (peak (plain, 4803, 24000) > 0.0f);
+    for (auto [key, choke, play] : { std::tuple { 40, 40, false }, std::tuple { 40, -1, false }, std::tuple { 0, -1, true } })
+    {
+        const auto x = run (key, choke, play);
+        CHECK (same (plain, x, 0, 4803) && peak (x, 4803, 24000) == 0.0f);
+    }
+    CHECK (same (plain, run (40, 36)));   // another key's choke
+    CHECK (same (plain, run (0, 0, true))); // Play's hit has no key: only a choke of any key (-1) stops it
+}
+
 void testLfos()
 {
     const Settings base = clean ({ { "Pitch", 1.0 } });
@@ -881,6 +953,19 @@ void testLfos()
     CHECK_NEAR (frequency (synced, 48000, 3300, 11500), 175.0 * std::sqrt (2.0), 1.0);   // up to beat 0.5 (frame 12000)
     CHECK_NEAR (frequency (synced, 48000, 12500, 23500), 175.0 / std::sqrt (2.0), 1.0);  // down to beat 1 (frame 24000)
     CHECK_NEAR (frequency (synced, 48000, 24500, 35500), 175.0 * std::sqrt (2.0), 1.0);
+    // A new tempo while it plays keeps it in step with the song from that frame: the same as starting there at that
+    // tempo.
+    {
+        const Settings lfo { { "LFO 1 Wave", 4 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } };
+        const double at12800 = 12800.0 * 2.0 / 48000.0;
+        const auto faster = with (lfo, { { 25600 } }, 0.8, [&] (uint64_t at) {
+            return at < 12800 ? Transport { true, 120.0, (double) at * 2.0 / 48000.0 } : Transport { true, 150.0, at12800 + (double) (at - 12800) * 2.5 / 48000.0 };
+        });
+        const auto startedFast = with (lfo, { { 25600 } }, 0.8, [&] (uint64_t at) {
+            return Transport { at >= 12800, 150.0, at < 12800 ? 0.0 : at12800 + (double) (at - 12800) * 2.5 / 48000.0 };
+        });
+        CHECK (same (faster, startedFast, 25600));
+    }
     // A jump puts it where the song now is: the same as starting there.
     {
         const auto jumped = with ({ { "LFO 1 Wave", 4 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } }, { { 25600 } }, 0.8,
@@ -943,8 +1028,10 @@ void testMidiControllers()
     for (const Cc& cc : { Cc { 100, 127, "Tune", 1.0 }, Cc { 101, 0, "Pitch", 0.0 }, Cc { 102, 64, "Decay", 64.0 / 127.0 }, Cc { 103, 127, "Harmonics", 1.0 },
                           Cc { 104, 10, "Pulse", 10.0 / 127.0 }, Cc { 105, 127, "Noise", 1.0 }, Cc { 106, 0, "Attack", 0.0 }, Cc { 107, 127, "EQ", 1.0 },
                           Cc { 113, 127, "Compression", 1.0 }, Cc { 114, 0, "Gate Time", 0.0 }, Cc { 115, 127, "Metal Noise 1", 499 },
-                          Cc { 116, 64, "Metal Noise 2", 251 }, Cc { 117, 127, "Volume", 1.0 }, Cc { 119, 100, "LFO 1 Wave", 15 },
-                          Cc { 120, 0, "Noise 2 Mask", 1 }, Cc { 121, 127, "LFO 1 Int", 1.0 }, Cc { 122, 0, "LFO 1 Speed", 0.0 },
+                          Cc { 115, 1, "Metal Noise 1", 1 }, Cc { 115, 2, "Metal Noise 1", 2 }, Cc { 115, 0, "Metal Noise 1", 0 },
+                          Cc { 116, 64, "Metal Noise 2", 250 }, Cc { 116, 1, "Metal Noise 2", 1 }, Cc { 116, 0, "Metal Noise 2", 0 },
+                          Cc { 120, 5, "Noise 2 Mask", 6 }, Cc { 121, 1, "LFO 1 Int", 1.0 / 127.0 }, Cc { 123, 15, "LFO 2 Wave", 15 }, Cc { 117, 127, "Volume", 1.0 }, Cc { 119, 100, "LFO 1 Wave", 15 },
+                          Cc { 120, 1, "Noise 2 Mask", 2 }, Cc { 121, 127, "LFO 1 Int", 1.0 }, Cc { 122, 0, "LFO 1 Speed", 0.0 },
                           Cc { 123, 3, "LFO 2 Wave", 3 }, Cc { 124, 127, "LFO 2 Int", 1.0 }, Cc { 125, 127, "LFO 2 Speed", 1.0 } })
     {
         Instance a;
@@ -953,6 +1040,24 @@ void testMidiControllers()
         a.render (64, 64, l, r, stopped, [&] (uint64_t, uint32_t, Events& e) { e.midi (10, 0xb3, (uint8_t) cc.number, (uint8_t) cc.value); }, &out);
         CHECK_NEAR (a.value (cc.name), cc.expected, 1e-6);
         CHECK (out.values.size() == 1 && out.values[0].first == a.id (cc.name));
+    }
+    // All Sound Off, Reset All Controllers and All Notes Off (120, 121, 123 at 0, as Melodee sends them on every
+    // channel when it silences a track) move no parameter; All Sound Off stops the kick on its frame.
+    {
+        Instance a;
+        a.setup ({ { "Noise 2 Mask", 12 }, { "LFO 1 Int", 0.4 }, { "LFO 2 Wave", 7 } });
+        OutEvents out;
+        std::vector<float> l, r;
+        a.render (24000, 128, l, r, stopped, [&] (uint64_t at, uint32_t, Events& e) {
+            if (at == 0)
+                e.note (0, CLAP_EVENT_NOTE_ON, 36, 1.0);
+            if (at == 9600)
+                for (uint8_t ch = 0; ch < 16; ++ch)
+                    e.midi (7, (uint8_t) (0xb0 | ch), 120, 0), e.midi (7, (uint8_t) (0xb0 | ch), 123, 0), e.midi (7, (uint8_t) (0xb0 | ch), 121, 0);
+        }, &out);
+        CHECK (out.values.empty());
+        CHECK (a.value ("Noise 2 Mask") == 12 && a.value ("LFO 1 Int") == 0.4f && a.value ("LFO 2 Wave") == 7);
+        CHECK (std::fabs (l[9606]) > 0.0f && peak (l, 9607, l.size()) == 0.0f);
     }
     // Another controller does nothing; a controller sounds the same as the knob.
     {
@@ -968,6 +1073,21 @@ void testMidiControllers()
     Instance b;
     b.setup ({ { "Pitch", 100.0 / 127.0 } });
     CHECK (same (viaCc, b.play ({ { 100 } }, 0.5)));
+}
+
+// A tempo that is infinite, NaN or 0 is no tempo the LFOs can follow (held to 1-1000 BPM, or 120): the output stays a
+// number, the kick plays, and it ends in exact silence.
+void testBadTempo()
+{
+    for (double bpm : { (double) INFINITY, -(double) INFINITY, std::nan (""), 0.0, 1.0e9 })
+    {
+        Instance a;
+        a.setup ({ { "LFO 1 Clock", 6 }, { "LFO 1 Int", 0.5 }, { "LFO 1 Mode", 0 }, { "LFO 2 Clock", 3 }, { "LFO 2 Int", 0.5 }, { "Decay", 0.2 } });
+        const auto x = a.play ({ { 0 }, { 30000 } }, 1.5, 128, [&] (uint64_t at) { return Transport { true, at < 20000 ? bpm : 120.0, (double) at * 2.0 / 48000.0 }; });
+        CHECK (finiteAndBounded (x));
+        CHECK (peak (x, 0, 4800) > 0.05f && peak (x, 30000, 34800) > 0.05f);
+        CHECK (peak (x, 66000, x.size()) == 0.0f);
+    }
 }
 
 // Finite, bounded output at random and extreme settings, hit fast and slow, with knobs and controllers moving.
@@ -1008,6 +1128,14 @@ void testBounded()
                                        e.midi (0, 0xb0, (uint8_t) (100 + (at / 4096) % 26), (uint8_t) ((at / 128) % 128));
                                });
         CHECK (finiteAndBounded (x));
+        if (! finiteAndBounded (x))
+            for (size_t i = 0; i < x.size(); ++i)
+                if (! std::isfinite (x[i]) || std::fabs (x[i]) > 1.0f)
+                {
+                    std::printf ("  out of range: trial %d, frame %zu, %.9g, at:\n", trial, i, (double) x[i]);
+                    for (auto& [name, v] : s) std::printf ("    %s %g\n", name.c_str(), v);
+                    break;
+                }
     }
 }
 } // namespace
@@ -1040,9 +1168,11 @@ int main (int argc, char** argv)
     testTakenAtTheHit();
     testSplitAndPitchMode();
     testDynamicsAndPlay();
+    testChoke();
     testLfos();
     testCvs();
     testMidiControllers();
+    testBadTempo();
     testBounded();
     entry->deinit();
     std::printf ("%d checks, %d failed\n", checks, failures);

@@ -76,7 +76,6 @@ inline const Preset presetTable[] = {
     MOONBASS_PRESET ("Pad Tunings", "pad-tunings", presetValues::padTunings),
 };
 #undef MOONBASS_PRESET
-constexpr uint32_t presetCount = sizeof (presetTable) / sizeof (presetTable[0]);
 
 inline const Preset* findPreset (const char* key)
 {
