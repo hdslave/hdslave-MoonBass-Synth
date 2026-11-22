@@ -1,11 +1,12 @@
-# MoonBass
+# hdslave MoonBass
 
-An analog-style kick drum synthesizer as a CLAP plug-in, built for the Akai MPC Sample running Melodee (64-bit ARM
-Linux, Cortex-A55). Hosts list it as **hdslave MoonBass** (id `com.hdslave.moonbass`). It follows the Jomox ModBase 09
-(Mk I and Mk II) and MBase 11: their eight knobs, and every parameter their menus, second functions and LED pages
-hide. Orbital Impact puts them on the MPC Sample’s screen, three to a page.
+**An analog-style kick drum synthesizer (ModBase 09 Mk I/II & MBase 11 style) as a CLAP plug-in for the Akai MPC Sample.**
 
-One voice, played by notes (pads, keys, the host's sequencer) or its Play button, as the hardware is played by MIDI.
+![MoonBass Orbital Impact screen running in hdslaveOS](docs/moonbass-screen.gif)
+
+Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melodee-sample) / [hdslaveOS](https://github.com/hdslave/hdslaveOS) (64-bit ARM Linux, Cortex-A55). Hosts list it as **hdslave MoonBass** (id `com.hdslave.moonbass`). It models the Jomox ModBase 09 (Mk I and Mk II) and MBase 11 — all eight front-panel knobs plus every hidden menu, second-function, LFO, metal noise, and CV modulation parameter — organized across 14 pages on its reactive **Orbital Impact** screen.
+
+One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
 ## Signal flow
 
