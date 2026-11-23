@@ -15,7 +15,7 @@ Read `../AGENTS.md`, then `../Workflow/plugins.md` and `../Workflow/host-facts.m
 
 ## Build and test
 
-- `./build.sh` builds the plug-in in a Linux arm64 container (image `melodee-builder`, Colima VM `melodee`). It runs `make all test`: the host tests in `tests/host.cpp` and the sound's fingerprint. Pass make targets to run others, for example `./build.sh sanitize` (ASan and UBSan over the host tests).
+- `./build.sh` builds the plug-in in a Linux arm64 container (image `melodee-builder`, Colima VM `melodee`). It runs `make all test`: the host tests in `tests/host.cpp` and the sound's fingerprint. Pass make targets to run others, for example `./build.sh sanitize` (ASan and UBSan over the unit and host tests).
 - `tools/bench.sh` counts the instructions of a 128-frame block with callgrind. A block is about 4.8 M cycles on one of the MPC's Cortex-A55 cores.
 - Check the build's own exit code: `./build.sh | grep …` hides a failure.
 
