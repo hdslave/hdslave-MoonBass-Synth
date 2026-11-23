@@ -4,6 +4,8 @@
 
 ![MoonBass Orbital Impact screen running in hdslaveOS](docs/moonbass-screen.gif)
 
+> **Desktop CLAP version (macOS & Windows):** A separate desktop CLAP build with all MPC screens on one interactive panel lives in [**`mac-clap/`**](mac-clap/) (`cd mac-clap && ./install-macos.sh`). Releases in this repo stay MPC Sample-only for now while the desktop builds are being finalized; the combined 11-plug-in suite also lives at [**hdslave-Synths-and-drum-machines-Mac-Win**](https://github.com/hdslave/hdslave-Synths-and-drum-machines-Mac-Win).
+
 Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melodee-sample) / [hdslaveOS](https://github.com/hdslave/hdslaveOS) (64-bit ARM Linux, Cortex-A55). Hosts list it as **hdslave MoonBass** (id `com.hdslave.moonbass`). It models the Jomox ModBase 09 (Mk I and Mk II) and MBase 11 — all eight front-panel knobs plus every hidden menu, second-function, LFO, metal noise, and CV modulation parameter — organized across 14 pages on its reactive **Orbital Impact** screen.
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
