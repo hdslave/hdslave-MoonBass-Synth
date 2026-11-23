@@ -73,10 +73,10 @@ struct Events
         a.param = { { sizeof (clap_event_param_value), time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0 }, id, nullptr, -1, -1, -1, -1, value };
         list.push_back (a);
     }
-    void note (uint32_t time, uint16_t type, int16_t key, double velocity)
+    void note (uint32_t time, uint16_t type, int16_t key, double velocity, int32_t noteId = -1)
     {
         Any a {};
-        a.note = { { sizeof (clap_event_note), time, CLAP_CORE_EVENT_SPACE_ID, type, 0 }, -1, 0, 0, key, velocity };
+        a.note = { { sizeof (clap_event_note), time, CLAP_CORE_EVENT_SPACE_ID, type, 0 }, noteId, 0, 0, key, velocity };
         list.push_back (a);
     }
     void midi (uint32_t time, uint8_t status, uint8_t a1, uint8_t a2)
@@ -92,11 +92,13 @@ struct Events
 struct OutEvents
 {
     std::vector<std::pair<clap_id, double>> values;
+    std::vector<uint32_t> times;
     clap_output_events out { this, [] (const clap_output_events* o, const clap_event_header* h) {
         if (h->space_id == CLAP_CORE_EVENT_SPACE_ID && h->type == CLAP_EVENT_PARAM_VALUE)
         {
             const auto* v = reinterpret_cast<const clap_event_param_value*> (h);
             static_cast<OutEvents*> (o->ctx)->values.push_back ({ v->param_id, v->value });
+            static_cast<OutEvents*> (o->ctx)->times.push_back (h->time);
         }
         return true;
     } };
@@ -1327,9 +1329,11 @@ void testScreen()
     const int wakeBefore = processRequests;
     input (MELODEE_SCREEN_PUSH, 1);
     CHECK (processRequests > wakeBefore);
+    // Press expiry counts audio frames, not wall time: a host asleep for over 500 ms of wall time (no process
+    // calls, so no frames) must still audition the press once at its next block.
     std::this_thread::sleep_for (std::chrono::milliseconds (550));
-    auto quiet = sound();
-    CHECK (peak (quiet, 0, quiet.size()) == 0 && !draw());
+    auto afterSleep = sound();
+    CHECK (peak (afterSleep, 0, afterSleep.size()) > 0.1f);
     input (MELODEE_SCREEN_PUSH, 1);
     a.params->flush (a.plugin, &none.in, &out.out); // only process consumes an audition
     auto kick = sound();
@@ -1354,6 +1358,219 @@ void testScreen()
     CHECK (!input (99, 1));
     for (int j = 0; j < 218; ++j)
         for (int x = 320; x < stride; ++x) CHECK (memory[j * stride + x] == guard);
+}
+// An event stamped past the block (a host's mistake) is applied at the block's end; anything it makes the plug-in
+// tell the host must still carry a time inside the block.
+void testOutputTimeClamp()
+{
+    Instance a;
+    OutEvents out;
+    std::vector<float> l, r;
+    a.render (128, 128, l, r, stopped, [&] (uint64_t at, uint32_t, Events& e) {
+        if (at == 0)
+            e.param (500, a.id ("Play"), 1.0);
+    }, &out);
+    CHECK (! out.values.empty());
+    for (uint32_t t : out.times)
+        CHECK (t <= 127);
+}
+
+// A page Play handled with a host Play must sound exactly as a host note at frame 0 of the same block does,
+// tempo-synced LFOs and all: presses sit with the frame-0 events, never after the transport. The case that
+// shows the order is a retriggered, tempo-synced LFO when Play also brings a new tempo, with Play landing
+// mid-tick (the stopped frames below) so the next 8-frame tick cannot retarget the difference away: a hit
+// taken before the transport starts its LFO at the old tempo's rate, as a frame-0 note does.
+void testPressWithPlay()
+{
+    const Settings patch = clean ({ { "LFO 1 Wave", 2 }, { "LFO 1 Int", 0.5 }, { "LFO 1 Mode", 1 }, { "LFO 1 Clock", 4 }, { "Decay", 1.0 } });
+    auto playing = [] (uint64_t at) { return Transport { true, 174.0, 2.5 + (double) at * 174.0 / 60.0 / 48000.0 }; };
+    std::vector<float> viaPress, viaNote;
+    {
+        Instance a;
+        a.setup (patch);
+        std::vector<float> l, r;
+        a.render (100, 128, l, r, stopped); // Play lands at frame 101, not on an 8-frame tick
+        const auto* page = static_cast<const clap_plugin_melodee_screen*> (a.plugin->get_extension (a.plugin, CLAP_EXT_MELODEE_SCREEN));
+        const melodee_screen_input_t push { MELODEE_SCREEN_PUSH, 0, false };
+        CHECK (page != nullptr && page->input (a.plugin, &push));
+        a.render (24000, 128, viaPress, r, playing);
+    }
+    {
+        Instance b;
+        b.setup (patch);
+        std::vector<float> l, r;
+        b.render (100, 128, l, r, stopped);
+        b.render (24000, 128, viaNote, r, playing, [] (uint64_t at, uint32_t, Events& e) {
+            if (at == 0)
+                e.note (0, CLAP_EVENT_NOTE_ON, 36, 1.0);
+        });
+    }
+    CHECK (peak (viaNote, 0, viaNote.size()) > 0.1f);
+    CHECK (same (viaPress, viaNote));
+}
+
+// Saving and loading by hand, as testState does, for the ringing-load and version checks below.
+struct StateReader { const std::vector<uint8_t>* data; size_t at; };
+std::vector<uint8_t> saveState (Instance& a)
+{
+    std::vector<uint8_t> saved;
+    clap_ostream os { &saved, [] (const clap_ostream* s, const void* d, uint64_t n) -> int64_t {
+        auto* v = static_cast<std::vector<uint8_t>*> (s->ctx);
+        v->insert (v->end(), static_cast<const uint8_t*> (d), static_cast<const uint8_t*> (d) + n);
+        return (int64_t) n;
+    } };
+    CHECK (a.state->save (a.plugin, &os));
+    return saved;
+}
+bool loadState (Instance& b, const std::vector<uint8_t>& data)
+{
+    StateReader reader { &data, 0 };
+    clap_istream is { &reader, [] (const clap_istream* s, void* d, uint64_t n) -> int64_t {
+        auto* r = static_cast<StateReader*> (s->ctx);
+        const uint64_t k = std::min<uint64_t> (n, r->data->size() - r->at);
+        std::memcpy (d, r->data->data() + r->at, k);
+        r->at += k;
+        return (int64_t) k;
+    } };
+    return b.state->load (b.plugin, &is);
+}
+
+// A load over a ringing kick settles every glide at the next block (a fresh instance has no glides in flight):
+// loading Volume 0 mid-ring is silence from that block, not a ~1 ms ease down.
+void testLoadSettlesWhileRinging()
+{
+    std::vector<uint8_t> silent;
+    {
+        Instance saver;
+        saver.setup ({ { "Volume", 0.0 } });
+        silent = saveState (saver);
+    }
+    Instance a;
+    a.setup (clean());
+    const auto ringing = a.play ({ { 0 } }, 0.05);
+    CHECK (peak (ringing, 0, ringing.size()) > 0.1f);
+    CHECK (loadState (a, silent));
+    const auto after = a.play ({}, 0.05);
+    CHECK (peak (after, 0, after.size()) == 0.0f);
+}
+
+// The cheap guards: a null host or id makes no plug-in, null text parses to nothing, a rate of 0 (or no number)
+// does not activate, a state from an unknown future version is refused untouched, and a choke carrying a note id
+// only stops the hit that id played.
+void testGuards()
+{
+    const auto* d = factory->get_plugin_descriptor (factory, 0);
+    CHECK (factory->create_plugin (factory, nullptr, d->id) == nullptr);
+    CHECK (factory->create_plugin (factory, &host, nullptr) == nullptr);
+    {
+        const clap_plugin* p = factory->create_plugin (factory, &host, d->id);
+        CHECK (p != nullptr && p->init (p));
+        CHECK (! p->activate (p, 0.0, 1, 4096));
+        CHECK (! p->activate (p, std::nan (""), 1, 4096));
+        p->destroy (p);
+    }
+    Instance a;
+    double v = 0.0;
+    CHECK (! a.params->text_to_value (a.plugin, a.id ("Pitch"), nullptr, &v));
+    // A forged future version: refused, and nothing moves.
+    std::vector<uint8_t> future = saveState (a);
+    future[4] = 2; // the version word, little-endian
+    CHECK (! loadState (a, future));
+    CHECK (a.value ("Pitch") == 0.5623f);
+    // Choke by note id.
+    a.setup (clean());
+    std::vector<float> l, r;
+    a.render (4800, 128, l, r, stopped, [] (uint64_t at, uint32_t, Events& e) {
+        if (at == 0)
+            e.note (0, CLAP_EVENT_NOTE_ON, 36, 1.0, 7);
+    });
+    CHECK (peak (l, 0, l.size()) > 0.1f);
+    a.render (4800, 128, l, r, stopped, [] (uint64_t at, uint32_t, Events& e) {
+        if (at == 0)
+            e.note (0, CLAP_EVENT_NOTE_CHOKE, 36, 0.0, 8);
+    });
+    CHECK (peak (l, 0, l.size()) > 0.01f); // another note's choke: still ringing
+    a.render (4800, 128, l, r, stopped, [] (uint64_t at, uint32_t, Events& e) {
+        if (at == 0)
+            e.note (0, CLAP_EVENT_NOTE_CHOKE, 36, 0.0, 7);
+    });
+    CHECK (peak (l, 0, l.size()) == 0.0f); // its own: stopped on the frame
+}
+
+// Hosts the usual harness does not imitate: no transport at all, a one-channel output, reactivation at a new
+// rate, and chokes with nothing (or twice the nothing) to stop.
+void testHostOddities()
+{
+    // One hand-made block: the given transport (or none) and channel count, a note at its first frame.
+    auto block = [] (Instance& a, bool withTransport, uint32_t channels, bool note) {
+        std::vector<float> l (4096, 0.0f), r (4096, 0.0f);
+        Events e;
+        if (note)
+            e.note (0, CLAP_EVENT_NOTE_ON, 36, 1.0);
+        OutEvents out;
+        float* outs[2] = { l.data(), r.data() };
+        clap_audio_buffer buffer {};
+        buffer.data32 = outs;
+        buffer.channel_count = channels;
+        clap_event_transport tr {};
+        tr.header = { sizeof (clap_event_transport), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT, 0 };
+        tr.flags = CLAP_TRANSPORT_HAS_TEMPO;
+        tr.tempo = 120.0;
+        clap_process p {};
+        p.frames_count = 4096;
+        p.transport = withTransport ? &tr : nullptr;
+        p.audio_outputs = &buffer;
+        p.audio_outputs_count = 1;
+        p.in_events = &e.in;
+        p.out_events = &out.out;
+        const auto status = a.plugin->process (a.plugin, &p);
+        return std::pair { status, l };
+    };
+    {
+        Instance a;
+        a.setup (clean());
+        const auto [status, l] = block (a, false, 2, true); // no transport: the kick still plays, finite
+        CHECK (status != CLAP_PROCESS_ERROR && finiteAndBounded (l) && peak (l, 0, l.size()) > 0.1f);
+    }
+    {
+        Instance a;
+        a.setup (clean());
+        const auto [status, l] = block (a, true, 1, true); // mono: sound on the one channel, no crash
+        CHECK (status != CLAP_PROCESS_ERROR && finiteAndBounded (l) && peak (l, 0, l.size()) > 0.1f);
+    }
+    {
+        // Deactivate, activate at 44.1 kHz: from there it is a fresh 44.1 kHz instance, to the bit.
+        Instance a;
+        a.setup (clean());
+        a.plugin->stop_processing (a.plugin);
+        a.plugin->deactivate (a.plugin);
+        CHECK (a.plugin->activate (a.plugin, 44100.0, 1, 4096));
+        CHECK (a.plugin->start_processing (a.plugin));
+        a.rate = 44100.0;
+        a.setup (clean());
+        const auto again = a.play ({ { 0 } }, 0.5);
+        Instance b (44100.0);
+        b.setup (clean());
+        const auto fresh = b.play ({ { 0 } }, 0.5);
+        CHECK (same (again, fresh));
+    }
+    {
+        // Chokes of any key while silent, twice on one frame: nothing stops (nothing plays), and a hit after
+        // them still plays.
+        Instance a;
+        a.setup (clean());
+        std::vector<float> l, r;
+        a.render (4800, 128, l, r, stopped, [] (uint64_t at, uint32_t, Events& e) {
+            if (at == 0)
+            {
+                e.note (0, CLAP_EVENT_NOTE_CHOKE, -1, 0.0);
+                e.note (0, CLAP_EVENT_NOTE_CHOKE, -1, 0.0);
+            }
+        });
+        CHECK (peak (l, 0, l.size()) == 0.0f);
+        const auto x = a.play ({ { 0 } }, 0.05);
+        CHECK (peak (x, 0, x.size()) > 0.1f);
+    }
 }
 } // namespace
 
@@ -1394,6 +1611,11 @@ int main (int argc, char** argv)
     testMidiControllers();
     testBadTempo();
     testBounded();
+    testOutputTimeClamp();
+    testPressWithPlay();
+    testLoadSettlesWhileRinging();
+    testGuards();
+    testHostOddities();
     entry->deinit();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

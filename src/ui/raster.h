@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 
 namespace hdui
 {
@@ -76,7 +78,9 @@ struct Raster
 };
 
 // Retain the last plug-in pixels independently of any host overlays. Compare only
-// invalidated regions. Scratch space is shared by all regions and bounded at compile time.
+// invalidated regions. Scratch space is shared by all regions and bounded at compile time. The two
+// buffers (359,072 bytes together) are allocated at the first paint, on the screen thread: an instance
+// whose page is never opened — every host but Melodee, and tracks never shown — carries none of it.
 class Picture
 {
 public:
@@ -84,14 +88,15 @@ public:
     bool region (Ink* dest, int stride, bool whole, int x, int y, Draw draw)
     {
         static_assert (W * H <= capacity);
-        Raster r { scratch, W, H };
-        std::fill_n (scratch, W * H, background);
+        if (! ensure()) return false;
+        Raster r { scratch.get(), W, H };
+        std::fill_n (scratch.get(), W * H, background);
         draw (r);
         bool touched = false;
         for (int j = 0; j < H; ++j)
         {
-            auto* old = prior + (y + j) * width + x;
-            const auto* row = scratch + j * W;
+            auto* old = prior.get() + (y + j) * width + x;
+            const auto* row = scratch.get() + j * W;
             if (! whole && std::memcmp (old, row, W * sizeof (Ink)) == 0) continue;
             int left = 0, right = W;
             if (! whole)
@@ -107,7 +112,15 @@ public:
     }
 
 private:
+    bool ensure()
+    {
+        if (prior) return true;
+        prior.reset (new (std::nothrow) Ink[width * height]());
+        scratch.reset (new (std::nothrow) Ink[capacity]());
+        if (! prior || ! scratch) { prior.reset(); scratch.reset(); return false; }
+        return true;
+    }
     static constexpr int capacity = 164 * 122;
-    Ink prior[width * height], scratch[capacity];
+    std::unique_ptr<Ink[]> prior, scratch;
 };
 } // namespace hdui

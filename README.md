@@ -8,6 +8,16 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
+Version 0.1.4. New in this version: a page Play is taken with the block's first-frame events (never after the
+transport) and its age counts audio frames rather than wall-clock time, so a sleeping host still auditions it;
+loading a state or preset over a ringing kick settles every glide at once; events a host stamps past the block
+can no longer make the plug-in answer with a time past the block; a choke carrying a note id stops only that
+note's hit; the screen's 359,072 bytes of picture memory are only taken once the page is first painted; and
+the usual guards (a null host makes no plug-in, a sample rate of 0 does not activate, a state from an unknown
+future version is refused untouched). The sound is unchanged to the bit outside the load-over-a-ringing-kick
+case above. MoonBass has not yet been run on the MPC; everything below was checked with the test host in this
+repository.
+
 ## Signal flow
 
 ```
@@ -214,12 +224,15 @@ One voice at the host's rate. Instructions a 128-frame block takes, from `tools/
 |---|---|---|
 | Everything busy (a hit every 13 ms with the longest gate, so the attack never rests: both metal noises, both LFOs, Harmonics, Compression) | about 70,000 | 1.5 % |
 | The default kick on every beat at 120 BPM | about 23,000 | 0.5 % |
-| Stopped | about 530 | 0.01 % |
+| Stopped | about 490 | 0.01 % |
 
 The attack section only runs for the gate and the moment after it. Once a kick has died away nothing runs at all:
 the LFOs' places are worked out from the time, so they need no ticking over. With Compression at 0 the VCA needs no
 division (a division is about 10 of the A55's cycles, more than its one instruction suggests), and the EQ's
-coefficient is only worked out while the EQ is moving. The build with Orbital Impact is 195 KiB stripped.
+coefficient is only worked out while the EQ is moving (and, memoised on the knob's exact value, not again in
+silent blocks while it stands still). Memoising the VCO's pitch step the same way was measured and dropped:
+with hits 13 ms apart the pitch envelope moves it every frame, so the test cost more than it saved in the
+worst case (70,610 instructions a block with it, 69,842 without). The build with Orbital Impact is 195 KiB stripped.
 
 ## Build and test
 
@@ -235,7 +248,7 @@ The tests load the plug-in through the CLAP API and check (about 465,000 checks)
 - the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
-- the screen’s 14 sets of knob bindings, pitch and amp graphs, pot pickup, host edits, audition wakeup, expiry of old presses, hit animation and idle redraws;
+- the screen’s 14 sets of knob bindings, pitch and amp graphs, pot pickup, host edits, audition wakeup and presses surviving a sleeping host, hit animation and idle redraws;
 - state save and load (and another version's state);
 - the presets, as preset discovery lists them and preset-load loads them;
 - hits landing on their frame at 44.1, 48 and 96 kHz and block sizes 1, 37, 128 and 4096;
@@ -267,7 +280,19 @@ The tests load the plug-in through the CLAP API and check (about 465,000 checks)
 - the CVs (each the same as turning its knob, adding, Accent, taken at the hit or not);
 - every MIDI controller in the map, and 120, 121 and 123 at 0 (as Melodee sends them) moving nothing;
 - tempos that are infinite, NaN, 0 or absurd: the output stays a number and the kick ends in silence;
-- finite, bounded output at 64 random and extreme settings, hit fast and slow.
+- finite, bounded output at 64 random and extreme settings, hit fast and slow;
+- a page Play delivered with the host's Play, sounding as a host note at frame 0 does, and still auditioning
+  after the host slept (its age counts audio frames, not wall time);
+- an event stamped past the block: applied at its end, and everything it makes the plug-in tell the host is
+  stamped inside the block;
+- a state loaded over a ringing kick settling every glide at the next block, and a state from an unknown
+  future version refused untouched;
+- hosts the usual harness does not imitate: no transport, a one-channel output, reactivation at a new rate
+  (then identical to a fresh instance there, to the bit), a null host or plug-in id, null parameter text, a
+  sample rate of 0, a choke carrying a note id, and chokes of any key while silent.
+
+`tests/unit.cpp` checks the metal noise generator by itself (33,780 checks): both generators off gives
+exactly nothing, the mask's counter-bit arithmetic, and a restart replaying the same frames to the bit.
 
 `tests/fingerprint.cpp` then renders 64 fixed scenarios:
 - each preset;

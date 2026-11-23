@@ -309,6 +309,7 @@ public:
         songT0 = 0;
         bpm = 120.0;
         lastClock[0] = lastClock[1] = lastMode[0] = lastMode[1] = -1;
+        eqForValid = false; // the rate may have changed, so the memoised EQ gain no longer holds
         dirty = true;
         retarget();
         for (int i = 0; i < smoothed; ++i)
@@ -331,7 +332,19 @@ public:
     void press (uint32_t id)
     {
         if (id == ParamId::play)
-            trigger (1.0f, 0.0f, -1); // the panel's Play: full velocity, the pitch as set
+            trigger (1.0f, 0.0f, -1, -1); // the panel's Play: full velocity, the pitch as set
+    }
+
+    // A state or preset was loaded: every glide is where it is going, from the next frame (a fresh instance
+    // has no glide in flight). Only the load does this; a knob turned while a kick rings still eases.
+    void settle()
+    {
+        if (dirty)
+            retarget();
+        for (int k = 0; k < smoothed; ++k)
+            smooth[k] = target[k];
+        moving = false;
+        updateEq();
     }
 
     // All sound off (MIDI CC 120, or a choke): the kick stops on this frame (a hit after it on the frame plays).
@@ -341,16 +354,24 @@ public:
         vcaEnv = pitchEnv = gate = coupling = eqState = 0.0f;
         gateLeft = 0;
         hitFrame = -1;
+        hitNoteId = -1;
     }
-    // A choke stops the hit its key played (key -1: whatever plays).
-    void choke (int key)
+    // A choke stops the hit its key played (key -1: whatever plays). A choke carrying a note id (hosts other
+    // than Melodee send them) stops only the hit that id played.
+    void choke (int key, int noteId = -1)
     {
+        if (noteId >= 0)
+        {
+            if (noteId == hitNoteId)
+                silence();
+            return;
+        }
         if (key < 0 || key == hitKey)
             silence();
     }
 
     // A MIDI note: plays if Split Mode takes its key, the pitch counted from the range's lowest key.
-    void note (int key, float velocity)
+    void note (int key, float velocity, int noteId = -1)
     {
         const int split = std::min (std::max ((int) knob[ParamId::splitMode], 0), 6);
         const KeyRange range = splitRanges[split];
@@ -359,7 +380,7 @@ public:
         const int n = split == 0 ? 0 : key - range.low;
         const float octaves = knob[ParamId::pitchMode] >= 0.5f ? (float) n / 12.0f
                                                                 : std::log2 (1.0f + (float) n * linearKeyStep); // a semitone at the bottom, then equal Hz
-        trigger (clampf (velocity, 0.0f, 1.0f), octaves, key);
+        trigger (clampf (velocity, 0.0f, 1.0f), octaves, key, noteId);
     }
 
     // The host's transport for the block about to play: where the song is (beats) and its tempo. The LFOs whose
@@ -442,21 +463,25 @@ private:
     enum LfoParam { lfoWaveOf, lfoSpeedOf, lfoIntOf, lfoDestOf, lfoModeOf, lfoClockOf };
     static uint32_t lfoId (int which, LfoParam p) { return (which == 0 ? ParamId::lfo1Wave : ParamId::lfo2Wave) + (uint32_t) p; }
 
-    void updateEq() { eqGain = onePoleGain (std::min (exp2Fast (eqSpanOctaves * smooth[eqKnobS]) * eqOpenHz, 0.4f * (float) rate) * 3.14159265f * invRate); }
+    // The gain is a pure function of the eased EQ knob (and the rate, fixed between prepares): memoised on the
+    // knob's exact bits, so a silent block whose EQ has not moved recomputes nothing, to the bit.
+    void updateEq()
+    {
+        uint32_t bits;
+        std::memcpy (&bits, &smooth[eqKnobS], sizeof (bits));
+        if (eqForValid && bits == eqForBits)
+            return;
+        eqForValid = true, eqForBits = bits;
+        eqGain = onePoleGain (std::min (exp2Fast (eqSpanOctaves * smooth[eqKnobS]) * eqOpenHz, 0.4f * (float) rate) * 3.14159265f * invRate);
+    }
 
     // The CV inputs, summed into each destination: CV n In (0-5 V) times CV n Amt (-128..127, over 128), so 5 V at
     // +127 adds nearly the whole of the destination's range.
     void sumCvs()
     {
-        for (float& c : cv)
-            c = 0.0f;
-        for (int n = 0; n < 4; ++n)
-        {
-            const uint32_t base = ParamId::cv1Dest + 3u * (uint32_t) n;
-            const int dest = (int) knob[base];
-            if (dest > CvDest::off && dest < CvDest::count)
-                cv[dest] += knob[base + 2] / cvVoltsMax * (knob[base + 1] / 128.0f);
-        }
+        cv[CvDest::off] = 0.0f;
+        for (int dest = CvDest::off + 1; dest < CvDest::count; ++dest)
+            cv[dest] = cvSum (knob, dest);
     }
     float withCv (uint32_t id, int dest) const { return clampf (knob[id] + cv[dest], 0.0f, 1.0f); }
 
@@ -528,7 +553,7 @@ private:
     // A hit, from a note (its key) or Play (-1). Two on one frame (pads struck together, a pad over the sequence: a
     // host may give all of a block's notes its first frame) are one hit: the louder plays as if the other had not come,
     // its key, pitch, gate and level with it (equal, the later); nothing of the softer is taken.
-    void trigger (float velocity, float keyOctaves, int key)
+    void trigger (float velocity, float keyOctaves, int key, int noteId)
     {
         const float ms = gateMs (knob[ParamId::gateTime]);
         if (now == hitFrame)
@@ -546,6 +571,7 @@ private:
         if (dirty)
             retarget();
         hitKey = key;
+        hitNoteId = noteId;
         // What the hit takes as it is now.
         hitTune = withCv (ParamId::tune, CvDest::tune) * tuneOctavesMax;
         vcaFall = std::exp (-ln1000 / (decaySeconds (withCv (ParamId::decay, CvDest::decay)) * (float) rate));
@@ -553,7 +579,7 @@ private:
         hitNoise = withCv (ParamId::noise, CvDest::noise);
         hitAttack = withCv (ParamId::attack, CvDest::attack);
         metal1 = (int) std::lrint (clampf (knob[ParamId::metalNoise1] + cv[CvDest::metal1] * (float) metalPatterns, 0.0f, (float) metalPatterns));
-        metal2 = (int) std::lrint (clampf (knob[ParamId::metalNoise2] + cv[CvDest::metal2] * (float) metalPatterns, 0.0f, (float) metalPatterns));
+        const int metal2 = (int) std::lrint (clampf (knob[ParamId::metalNoise2] + cv[CvDest::metal2] * (float) metalPatterns, 0.0f, (float) metalPatterns));
         metal2Bits = MetalNoise::selection (metal2, (int) clampf (knob[ParamId::noise2Mask], 1.0f, 16.0f));
         gateLeft = std::max<int32_t> (1, (int32_t) std::lrint (ms * 0.001 * rate));
         hitLevel = levelOf (velocity, ms);
@@ -594,6 +620,8 @@ private:
         }
 
         // The VCO: Pitch, the key, the Tune envelope and the LFOs, in octaves above pitchLowHz.
+        // (Memoising exp2Fast on the exact `octaves` was measured and dropped: with hits 13 ms apart the
+        // pitch envelope moves the sum every frame, so the test only added instructions in the worst case.)
         const float octaves = smooth[pitchKnobS] * pitchSpanOctaves + keyOct + hitTune * pitchEnv + lfoPitch * lfoPitchOctaves;
         const float dt = std::min (exp2Fast (octaves) * pitchLowHz * invRate, maxDt);
         pitchEnv *= pitchFall;
@@ -660,13 +688,16 @@ private:
     float cv[CvDest::count] {};
     float target[smoothed] {}, smooth[smoothed] {};
     float eqGain = 0.5f;
+    uint32_t eqForBits = 0; // the eased EQ knob's bits eqGain was worked out for (updateEq's memo)
+    bool eqForValid = false;
     bool dirty = true, moving = false;
 
     // The hit.
     float hitTune = 0.0f, vcaFall = 0.0f, hitPulse = 0.0f, hitNoise = 0.0f, hitAttack = 0.0f, hitLevel = 0.0f, keyOct = 0.0f;
-    int metal1 = 1, metal2 = 0;
+    int metal1 = 1;
     uint32_t metal2Bits = 0;
     int hitKey = -1; // the key that played the hit (-1: Play), for a choke
+    int hitNoteId = -1; // its note id where the host sends one (-1: none), for a choke carrying an id
     int32_t gateLeft = 0;
     int64_t hitFrame = -1;       // the frame the hit started on (-1: none since a silence), for another on it
     bool hitWasSilent = false;   // nothing sounded before it

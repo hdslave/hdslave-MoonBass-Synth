@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -23,7 +22,7 @@ const char* const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEA
                                  CLAP_PLUGIN_FEATURE_STEREO, nullptr }; // one voice, a stereo port (the same both sides)
 
 const clap_plugin_descriptor descriptor {
-    CLAP_VERSION, "com.hdslave.moonbass", "hdslave MoonBass", "hdslave", "", "", "", MOONBASS_VERSION,
+    CLAP_VERSION, "com.hdslave.moonbass", "hdslave MoonBass", "hdslave", "https://github.com/hdslave/hdslave-MoonBass-Synth", "", "", MOONBASS_VERSION,
     "An analog-style kick drum: a VCO with pitch envelope and harmonics, pulse and two metallic noise generators in "
     "the attack, two LFOs and four CV inputs, every parameter on its own page",
     features,
@@ -42,7 +41,13 @@ struct Plugin
     Screen screen;
     const clap_host_melodee_screen* hostScreen = nullptr;
     const clap_host_params* hostParams = nullptr;
-    std::atomic<uint64_t> outgoing { 0 }, pressedAt { 0 };
+    std::atomic<uint64_t> outgoing { 0 };
+    // Press age is counted in audio frames, never wall time: framesDone is the frames processed so far (the
+    // audio thread writes it, the screen thread reads it to stamp a press), so a host asleep between the
+    // press and its next block ages the press not at all.
+    std::atomic<int64_t> framesDone { 0 }, pressFrame { -1 };
+    std::atomic<bool> settleLoad { false }; // a state or preset loaded: settle the glides at the next block
+    double sampleRate = 48000.0;
     std::atomic<uint32_t> hits { 0 };
     bool valuesMoved = false; // coalesce host automation and MIDI into one repaint per block
     bool active = false;
@@ -53,12 +58,6 @@ Plugin& of (const clap_plugin* p) { return *static_cast<Plugin*> (p->plugin_data
 void requestPaint (const Plugin& p)
 {
     if (p.hostScreen && p.hostScreen->request_paint) p.hostScreen->request_paint (p.host);
-}
-
-uint64_t steadyMs()
-{
-    using namespace std::chrono;
-    return (uint64_t) duration_cast<milliseconds> (steady_clock::now().time_since_epoch()).count();
 }
 
 // Parameters --------------------------------------------------------------------------------------------------
@@ -85,7 +84,7 @@ bool paramsInfo (const clap_plugin*, uint32_t index, clap_param_info* info)
 bool paramsValue (const clap_plugin* plugin, clap_id id, double* value)
 {
     const int index = paramIndex (id);
-    if (index < 0)
+    if (index < 0 || value == nullptr)
         return false;
     *value = of (plugin).values[index].load (std::memory_order_relaxed);
     return true;
@@ -94,7 +93,7 @@ bool paramsValue (const clap_plugin* plugin, clap_id id, double* value)
 bool paramsToText (const clap_plugin*, clap_id id, double value, char* text, uint32_t size)
 {
     const int index = paramIndex (id);
-    if (index < 0 || size == 0)
+    if (index < 0 || text == nullptr || size == 0)
         return false;
     formatParam (paramTable[index], (float) value, text, size);
     return true;
@@ -103,7 +102,7 @@ bool paramsToText (const clap_plugin*, clap_id id, double value, char* text, uin
 bool paramsFromText (const clap_plugin*, clap_id id, const char* text, double* value)
 {
     const int index = paramIndex (id);
-    if (index < 0)
+    if (index < 0 || value == nullptr)
         return false;
     float v = 0.0f;
     if (! parseParam (paramTable[index], text, v))
@@ -144,7 +143,9 @@ void sendPageValues (Plugin& p, const clap_output_events* out)
 // as turning it would, and the host is told. Any MIDI channel: the host's track is the channel.
 // 120, 121 and 123 at 0 are MIDI's All Sound Off, Reset All Controllers and All Notes Off, which hosts send on stop
 // and panic (Melodee does, on every channel): those stop the sound or do nothing, and never move a parameter.
-void controller (Plugin& p, uint32_t time, int number, int value, const clap_output_events* out)
+// `lastFrame` is the block's last frame: an event stamped past the block is applied at its end, and what it
+// makes the plug-in tell the host is stamped no later than that.
+void controller (Plugin& p, uint32_t time, int number, int value, const clap_output_events* out, uint32_t lastFrame)
 {
     using namespace ParamId;
     if (value == 0 && (number == 120 || number == 121 || number == 123))
@@ -186,11 +187,11 @@ void controller (Plugin& p, uint32_t time, int number, int value, const clap_out
     p.values[index].store (clamped, std::memory_order_relaxed);
     p.applied[index] = clamped;
     p.engine.set (id, clamped);
-    tellHost (out, time, id, clamped);
+    tellHost (out, std::min (time, lastFrame), id, clamped);
 }
 
 // One event: parameter values go to the engine at once; notes trigger it.
-void handle (Plugin& p, const clap_event_header* e, const clap_output_events* out)
+void handle (Plugin& p, const clap_event_header* e, const clap_output_events* out, uint32_t lastFrame)
 {
     if (e->space_id != CLAP_CORE_EVENT_SPACE_ID)
         return;
@@ -210,7 +211,7 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
                 if (value >= 0.5f)
                 {
                     p.engine.press (info.id);
-                    tellHost (out, e->time, info.id, 0.0);
+                    tellHost (out, std::min (e->time, lastFrame), info.id, 0.0);
                 }
                 p.values[index].store (0.0f, std::memory_order_relaxed);
                 p.applied[index] = 0.0f;
@@ -227,13 +228,14 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
             // A note plays the kick if Split Mode takes its key (a note off does nothing: Gate Time is the gate).
             const auto* n = reinterpret_cast<const clap_event_note*> (e);
             if (n->velocity > 0.0 && n->key >= 0 && n->key < 128)
-                p.engine.note (n->key, (float) n->velocity);
+                p.engine.note (n->key, (float) n->velocity, n->note_id);
             break;
         }
         case CLAP_EVENT_NOTE_CHOKE:
         {
             // A choke (Melodee's all sound off, a cut group) stops the hit its key played.
-            p.engine.choke (reinterpret_cast<const clap_event_note*> (e)->key);
+            const auto* n = reinterpret_cast<const clap_event_note*> (e);
+            p.engine.choke (n->key, n->note_id);
             break;
         }
         case CLAP_EVENT_MIDI:
@@ -242,7 +244,7 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
             if ((m->data[0] & 0xf0) == 0x90 && (m->data[2] & 0x7f) > 0)
                 p.engine.note (m->data[1] & 0x7f, (float) (m->data[2] & 0x7f) / 127.0f);
             else if ((m->data[0] & 0xf0) == 0xb0)
-                controller (p, e->time, m->data[1] & 0x7f, m->data[2] & 0x7f, out);
+                controller (p, e->time, m->data[1] & 0x7f, m->data[2] & 0x7f, out, lastFrame);
             break;
         }
         default: break;
@@ -281,7 +283,7 @@ void paramsFlush (const clap_plugin* plugin, const clap_input_events* in, const 
 const clap_plugin_params paramsExtension { paramsCount, paramsInfo, paramsValue, paramsToText, paramsFromText, paramsFlush };
 
 // State: "MOON", a version, the number of values, then (id, value) pairs; unknown ids are skipped, missing ones keep
-// their defaults, so a state saved by another version still loads.
+// their defaults, so a state saved by a later build at this version still loads. Another version is refused.
 constexpr char stateTag[4] = { 'M', 'O', 'O', 'N' };
 constexpr uint32_t stateVersion = 1;
 
@@ -317,7 +319,8 @@ bool readAll (const clap_istream* s, void* data, uint64_t size)
 void setAll (Plugin& p, const float* values)
 {
     p.outgoing.store (0, std::memory_order_relaxed);
-    p.pressedAt.store (0, std::memory_order_relaxed);
+    p.pressFrame.store (-1, std::memory_order_relaxed);
+    p.settleLoad.store (true, std::memory_order_relaxed); // the next block settles every glide (engine.settle)
     for (uint32_t i = 0; i < paramCount; ++i)
         p.values[i].store (values[i], std::memory_order_relaxed);
     p.mainChanged.store (true, std::memory_order_release);
@@ -329,6 +332,8 @@ void setAll (Plugin& p, const float* values)
 
 bool stateSave (const clap_plugin* plugin, const clap_ostream* stream)
 {
+    if (stream == nullptr)
+        return false;
     auto& p = of (plugin);
     const uint32_t header[2] = { stateVersion, paramCount };
     if (! writeAll (stream, stateTag, 4) || ! writeAll (stream, header, sizeof (header)))
@@ -344,11 +349,15 @@ bool stateSave (const clap_plugin* plugin, const clap_ostream* stream)
 
 bool stateLoad (const clap_plugin* plugin, const clap_istream* stream)
 {
+    if (stream == nullptr)
+        return false;
     auto& p = of (plugin);
     char tag[4] = {};
     uint32_t header[2] = {};
+    // Only the version this build writes is accepted: a future version's pairs are not guessed at, and a
+    // refused load changes nothing. (Within v1, unknown ids are skipped, so a later v1 state still loads.)
     if (! readAll (stream, tag, 4) || std::memcmp (tag, stateTag, 4) != 0 || ! readAll (stream, header, sizeof (header))
-        || header[0] == 0 || header[1] > 4096)
+        || header[0] != stateVersion || header[1] > 4096)
         return false;
     float loaded[paramCount];
     for (uint32_t i = 0; i < paramCount; ++i)
@@ -384,9 +393,8 @@ bool presetFromLocation (const clap_plugin* plugin, uint32_t kind, const char*, 
     float values[paramCount];
     presetValuesOf (*preset, values);
     setAll (p, values);
-    if (const auto* hostParams = static_cast<const clap_host_params*> (p.host->get_extension (p.host, CLAP_EXT_PARAMS)))
-        if (hostParams->rescan != nullptr)
-            hostParams->rescan (p.host, CLAP_PARAM_RESCAN_VALUES);
+    if (p.hostParams != nullptr && p.hostParams->rescan != nullptr) // cached at init, as elsewhere
+        p.hostParams->rescan (p.host, CLAP_PARAM_RESCAN_VALUES);
     if (hostPresets != nullptr && hostPresets->loaded != nullptr)
         hostPresets->loaded (p.host, kind, nullptr, key);
     return true;
@@ -452,6 +460,11 @@ void pluginDestroy (const clap_plugin* plugin)
 bool pluginActivate (const clap_plugin* plugin, double rate, uint32_t, uint32_t maxFrames)
 {
     auto& p = of (plugin);
+    if (! std::isfinite (rate) || rate <= 0.0) // the engine divides by the rate: no rate, no activation
+        return false;
+    p.sampleRate = rate;
+    p.framesDone.store (0, std::memory_order_relaxed); // the engine's frame count restarts in prepare
+    p.pressFrame.store (-1, std::memory_order_relaxed);
     p.engine.prepare (rate, maxFrames);
     p.active = true;
     return true;
@@ -483,6 +496,8 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
     const uint32_t frames = process->frames_count;
     if (process->audio_outputs_count < 1 || process->audio_outputs[0].channel_count < 1)
         return CLAP_PROCESS_ERROR;
+    const int64_t blockStart = p.framesDone.load (std::memory_order_relaxed);
+    const uint32_t lastFrame = frames > 0 ? frames - 1 : 0;
     float* left = process->audio_outputs[0].data32[0];
     float* right = process->audio_outputs[0].channel_count > 1 ? process->audio_outputs[0].data32[1] : nullptr;
 
@@ -494,6 +509,9 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
             if (v != p.applied[i] && paramTable[i].kind != Kind::button)
                 p.applied[i] = v, p.engine.set (paramTable[i].id, v);
         }
+    // A load among those values settles every glide now, sounding or not: the loaded sound from this block.
+    if (p.settleLoad.load (std::memory_order_relaxed) && p.settleLoad.exchange (false, std::memory_order_acquire))
+        p.engine.settle();
 
     sendPageValues (p, process->out_events);
 
@@ -503,7 +521,18 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
     const uint32_t count = in != nullptr ? in->size (in) : 0;
     uint32_t next = 0;
     for (; next < count && in->get (in, next)->time == 0; ++next)
-        handle (p, in->get (in, next), process->out_events);
+        handle (p, in->get (in, next), process->out_events, lastFrame);
+
+    // A page press sits with the frame-0 events, the same as a note: never after the transport, so a press
+    // delivered with Play sounds as a host Play at frame 0 does. Its age counts audio frames since it was
+    // stamped (half a second of them at most): a host asleep in between processed none, so the press still
+    // auditions once at this block, however much wall time passed.
+    if (p.pressFrame.load (std::memory_order_relaxed) >= 0)
+    {
+        const int64_t pressed = p.pressFrame.exchange (-1, std::memory_order_acquire);
+        if (pressed >= 0 && blockStart - pressed <= (int64_t) (p.sampleRate * 0.5))
+            p.engine.press (ParamId::play);
+    }
 
     // The host's transport: the tempo for the LFOs whose Clock follows it, the song's place for those in step with it.
     if (const auto* t = process->transport)
@@ -520,14 +549,6 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
     else
         p.engine.transport (false, false, 0.0, 120.0, frames);
 
-    // A sleeping host may deliver this much later. Only audition a recent press.
-    if (p.pressedAt.load (std::memory_order_relaxed) != 0)
-    {
-        const auto pressed = p.pressedAt.exchange (0, std::memory_order_acquire);
-        if (pressed && steadyMs() - pressed <= 500)
-            p.engine.press (ParamId::play);
-    }
-
     uint32_t done = 0;
     while (done < frames)
     {
@@ -537,7 +558,7 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
             const auto* e = in->get (in, next);
             if (e->time > done)
                 break;
-            handle (p, e, process->out_events);
+            handle (p, e, process->out_events, lastFrame);
             ++next;
         }
         uint32_t until = frames;
@@ -547,7 +568,8 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
         done = until;
     }
     for (; next < count; ++next) // events stamped past the block (a host's mistake): applied at its end
-        handle (p, in->get (in, next), process->out_events);
+        handle (p, in->get (in, next), process->out_events, lastFrame);
+    p.framesDone.store (blockStart + (int64_t) frames, std::memory_order_release);
     if (p.hostScreen && (p.valuesMoved || p.hits.load (std::memory_order_relaxed) != p.engine.hitCount()))
     {
         p.hits.store (p.engine.hitCount(), std::memory_order_release);
@@ -580,7 +602,7 @@ bool screenInput (const clap_plugin* plugin, const melodee_screen_input_t* e)
             p.screen.navigate (e->value);
             break;
         case MELODEE_SCREEN_PUSH:
-            p.pressedAt.store (steadyMs(), std::memory_order_release);
+            p.pressFrame.store (p.framesDone.load (std::memory_order_relaxed), std::memory_order_release);
             if (p.host->request_process) p.host->request_process (p.host);
             break;
         case MELODEE_SCREEN_WHEEL:
@@ -628,7 +650,7 @@ const clap_plugin_descriptor* factoryDescriptor (const clap_plugin_factory*, uin
 
 const clap_plugin* factoryCreate (const clap_plugin_factory*, const clap_host* host, const char* id)
 {
-    if (! clap_version_is_compatible (host->clap_version) || std::strcmp (id, descriptor.id) != 0)
+    if (host == nullptr || id == nullptr || ! clap_version_is_compatible (host->clap_version) || std::strcmp (id, descriptor.id) != 0)
         return nullptr;
     void* memory = ::operator new (sizeof (Plugin), std::align_val_t (64), std::nothrow);
     if (memory == nullptr)

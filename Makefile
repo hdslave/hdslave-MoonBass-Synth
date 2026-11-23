@@ -34,8 +34,14 @@ $(OUT)/fingerprint: tests/fingerprint.cpp tests/fingerprint_scenarios.h Makefile
 	@mkdir -p $(OUT)
 	$(CXX) -std=c++17 -O2 $(WARN) -Ithird_party/clap/include tests/fingerprint.cpp -ldl -o $@
 
-test: $(OUT)/MoonBass.clap $(OUT)/host $(OUT)/fingerprint
+# Engine-level checks (tests/unit.cpp), built with the shipped OPT flags as the bench is.
+$(OUT)/unit: tests/unit.cpp src/engine.h src/params.h Makefile
+	@mkdir -p $(OUT)
+	$(CXX) -std=c++17 $(OPT) $(WARN) -fno-exceptions -fno-rtti -Isrc tests/unit.cpp -o $@
+
+test: $(OUT)/MoonBass.clap $(OUT)/host $(OUT)/fingerprint $(OUT)/unit
 	$(OUT)/host $(OUT)/MoonBass.clap $(OUT)
+	$(OUT)/unit
 	$(OUT)/fingerprint $(OUT)/MoonBass.clap tests/fingerprint.txt > /dev/null
 
 # The sound's hashes after a change meant to change the sound (see tests/fingerprint.cpp).

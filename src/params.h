@@ -13,7 +13,7 @@
 #include <strings.h>
 
 #ifndef MOONBASS_VERSION
-#define MOONBASS_VERSION "0.1.3"
+#define MOONBASS_VERSION "0.1.4"
 #endif
 
 namespace moonbass
@@ -115,6 +115,18 @@ namespace CvDest
 enum : uint8_t { off, tune, pitch, decay, harmonics, pulse, noise, attack, eq, compression, metal1, metal2, lfo1Rate, lfo1Int, lfo2Rate, lfo2Int, accent, count };
 }
 static_assert (sizeof (cvDestChoices) / sizeof (cvDestChoices[0]) == CvDest::count, "a name a destination");
+
+// The CV inputs summed for one destination, from values by id: each CV whose Dest is this one adds
+// CV n In (0-5 V) times CV n Amt (-128..127, over 128), so 5 V at +127 adds nearly the destination's whole
+// range. The engine and the screen's graphs share this, so a destination can only mean one thing.
+inline float cvSum (const float* byId, int dest)
+{
+    float sum = 0.0f;
+    for (uint32_t base = ParamId::cv1Dest; base <= ParamId::cv4Dest; base += 3)
+        if ((int) byId[base] == dest)
+            sum += byId[base + 2] / cvVoltsMax * (byId[base + 1] / 128.0f);
+    return sum;
+}
 
 using P = Param;
 #define CONT(id, name, module, lo, hi, def, unit) P { ParamId::id, name, module, lo, hi, def, Kind::continuous, Unit::unit, nullptr }
@@ -257,6 +269,8 @@ inline void formatParam (const Param& p, float v, char* text, uint32_t size)
 // Reads text as formatParam writes it (units optional); a choice by its name or its number.
 inline bool parseParam (const Param& p, const char* text, float& v)
 {
+    if (text == nullptr)
+        return false;
     if (p.kind == Kind::choice)
     {
         const int n = (int) (p.max - p.min) + 1;

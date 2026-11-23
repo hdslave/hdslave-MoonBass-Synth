@@ -69,13 +69,10 @@ class Screen
         sprite (r, art::moon, 156, 0, 156, 118, 5 - pulse, 2 + pulse, 156 + 2 * pulse, 118 - 2 * pulse);
     }
 
+    // The engine's own CV sum (params.h), so the graphs follow the same destination arithmetic as the sound.
     float withCv (uint32_t id, int dest) const
     {
-        float sum = 0;
-        for (uint32_t base = ParamId::cv1Dest; base <= ParamId::cv4Dest; base += 3)
-            if ((int) values[base] == dest)
-                sum += values[base + 2] / cvVoltsMax * (values[base + 1] / 128.0f);
-        return std::clamp (values[id] + sum, 0.0f, 1.0f);
+        return std::clamp (values[id] + cvSum (values.data(), dest), 0.0f, 1.0f);
     }
 
     // Envelopes of the patch at its base pitch. The pitch graph shows the excursion above
