@@ -40,7 +40,7 @@ struct TilesAccess
         return tile < kTileCount ? kTitles[tile] : "";
     }
 
-    static void drawDeck (Screen& s, const melodee_screen_canvas_t& c, int bankPage, int y0, int h)
+    static void drawDeck (Screen& s, const melodee_screen_frame_t& c, int bankPage, int y0, int h)
     {
         hdui::Raster r { c.pixels + y0 * c.stride, 320, h };
         r.box (0, 0, 320, h, Screen::panel);
@@ -101,9 +101,9 @@ struct TilesAccess
         }
     }
 
-    static bool CLAP_ABI paint (const clap_plugin_t* plugin, uint32_t tile, const melodee_screen_canvas_t* canvas, clap_id knobs_out[3])
+    static bool CLAP_ABI paint (const clap_plugin_t* plugin, uint32_t tile, const melodee_screen_frame_t* frame, clap_id knobs_out[3])
     {
-        if (tile >= kTileCount || !canvas || !canvas->pixels) return false;
+        if (tile >= kTileCount || !frame || !frame->pixels) return false;
         auto& p = of (plugin);
 
         if (tile == 0)
@@ -111,8 +111,8 @@ struct TilesAccess
             const int savedPage = p.screen.page;
             p.screen.page = 0;
             p.screen.lastPage = -1;
-            melodee_screen_canvas_t c = *canvas;
-            c.whole = true;
+            melodee_screen_frame_t c = *frame;
+            c.redraw_all = 1;
             const bool drew = p.screen.paint (c, p.values, p.hits.load (std::memory_order_acquire));
             if (knobs_out)
                 p.screen.knobs (knobs_out);
@@ -125,7 +125,7 @@ struct TilesAccess
             p.screen.values[paramTable[i].id] = p.values[i].load (std::memory_order_relaxed);
 
         // Draw MoonBass header (0..43) + 3 stacked MoonBass big-digit decks in y = 44..166 (41px each)
-        hdui::Raster topR { canvas->pixels, 320, 44 };
+        hdui::Raster topR { frame->pixels, 320, 44 };
         topR.box (0, 0, 320, 44, 0xff161122);
         const int savedPage = p.screen.page;
         p.screen.page = kTileBanks[tile][0];
@@ -136,7 +136,7 @@ struct TilesAccess
         {
             const int y0 = 44 + b * 41;
             const int h = 41;
-            drawDeck (p.screen, *canvas, kTileBanks[tile][b], y0, h);
+            drawDeck (p.screen, *frame, kTileBanks[tile][b], y0, h);
         }
 
         if (knobs_out)

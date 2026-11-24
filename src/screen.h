@@ -22,7 +22,8 @@ class Screen
     hdui::Picture picture;
     std::array<float, ParamId::count> values {};
     int page = 0, lastPage = -1, lastPulse = -1;
-    melodee_screen_knob_t lastKnobs[3] {};
+    int16_t lastKnobs[3] { -1, -1, -1 };
+    bool lastKnobsLive[3] {};
     bool lastShift = false, pulsing = false;
     uint32_t seenHits = 0;
     uint64_t hitAt = 0;
@@ -129,7 +130,7 @@ class Screen
         if (text[n]) r.text (x + 3, 31, text + n + 1, muted);
     }
 
-    void footer (Raster& r, const melodee_screen_canvas_t& c) const
+    void footer (Raster& r, const melodee_screen_frame_t& c) const
     {
         r.box (0, 0, 320, 51, panel);
         r.box (0, 0, 320, 1, 0xff66507d);
@@ -168,8 +169,8 @@ class Screen
             const int at = (int) std::lround ((v - p.min) / (p.max - p.min) * 87.0f);
             r.box (x, 42, 88, 2, 0xff49364f);
             r.box (x, 42, at + 1, 2, k == 2 ? lilac : orange);
-            if (!c.knobs[k].engaged && c.knobs[k].position >= 0)
-                r.frame (x + c.knobs[k].position * 87 / 127 - 2, 45, 5, 3, paper);
+            if (!c.pots_live[k] && c.pots[k] >= 0)
+                r.frame (x + c.pots[k] * 87 / 127 - 2, 45, 5, 3, paper);
         }
     }
 
@@ -179,19 +180,19 @@ public:
     {
         page = std::clamp (page + std::clamp (delta, -pages, pages), 0, pages - 1);
     }
-    void knobs (clap_id ids[3]) const
+    void knobs (uint32_t ids[3]) const
     {
         for (int k = 0; k < 3; ++k)
         {
             const auto& p = paramTable[firstRow() + k];
-            ids[k] = p.kind == Kind::button ? CLAP_INVALID_ID : p.id;
+            ids[k] = p.kind == Kind::button ? MELODEE_SCREEN_NO_CONTROL : p.id;
         }
     }
     bool animating() const { return pulsing; }
 
-    bool paint (const melodee_screen_canvas_t& c, const std::atomic<float>* params, uint32_t hits)
+    bool paint (const melodee_screen_frame_t& c, const std::atomic<float>* params, uint32_t hits)
     {
-        const bool whole = c.whole || lastPage < 0;
+        const bool whole = c.redraw_all != 0 || lastPage < 0;
         const bool moved = lastPage != page;
         bool pitchChanged = false, ampChanged = false, cardsChanged = false, knobsMoved = false;
         for (uint32_t i = 0; i < paramCount; ++i)
@@ -207,12 +208,14 @@ public:
         }
         for (int k = 0; k < 3; ++k)
         {
-            knobsMoved |= c.knobs[k].position != lastKnobs[k].position || c.knobs[k].engaged != lastKnobs[k].engaged;
-            lastKnobs[k] = c.knobs[k];
+            const bool liveNow = c.pots_live[k] != 0;
+            knobsMoved |= c.pots[k] != lastKnobs[k] || liveNow != lastKnobsLive[k];
+            lastKnobs[k] = c.pots[k];
+            lastKnobsLive[k] = liveNow;
         }
         // A hit while the page was away is counted, not shown: a whole paint opens without a pulse.
-        if (seenHits != hits) { seenHits = hits; if (! whole) hitAt = c.now_ms, pulsing = true; }
-        const uint64_t age = c.now_ms - hitAt;
+        if (seenHits != hits) { seenHits = hits; if (! whole) hitAt = c.time_ms, pulsing = true; }
+        const uint64_t age = c.time_ms - hitAt;
         pulsing = pulsing && age < 180;
         const int pulse = pulsing ? 6 - (int) (age / 30) : 0;
         bool drew = false;
@@ -224,11 +227,12 @@ public:
             drew |= picture.region<156,61> (c.pixels, c.stride, whole, 164, 45, [&](Raster& r) { envelope (r, true); });
         if (whole || ampChanged)
             drew |= picture.region<156,61> (c.pixels, c.stride, whole, 164, 106, [&](Raster& r) { envelope (r, false); });
-        if (whole || moved || cardsChanged || knobsMoved || c.shift != lastShift)
+        const bool shiftNow = c.shift != 0;
+        if (whole || moved || cardsChanged || knobsMoved || shiftNow != lastShift)
             drew |= picture.region<320,51> (c.pixels, c.stride, whole, 0, 167, [&](Raster& r) { footer (r, c); });
         lastPulse = pulse;
         lastPage = page;
-        lastShift = c.shift;
+        lastShift = shiftNow;
         return drew;
     }
 };

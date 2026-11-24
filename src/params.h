@@ -13,7 +13,7 @@
 #include <strings.h>
 
 #ifndef MOONBASS_VERSION
-#define MOONBASS_VERSION "0.1.4"
+#define MOONBASS_VERSION "0.1.5"
 #endif
 
 namespace moonbass
