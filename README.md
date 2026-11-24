@@ -10,7 +10,9 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
-Version 0.1.4. New in this version: a page Play is taken with the block's first-frame events (never after the
+Version 0.1.5. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+
+In 0.1.4, a page Play is taken with the block's first-frame events (never after the
 transport) and its age counts audio frames rather than wall-clock time, so a sleeping host still auditions it;
 loading a state or preset over a ringing kick settles every glide at once; events a host stamps past the block
 can no longer make the plug-in answer with a time past the block; a choke carrying a note id stops only that
