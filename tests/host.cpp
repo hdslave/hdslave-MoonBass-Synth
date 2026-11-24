@@ -425,7 +425,7 @@ void testParameters()
     CHECK (a.text ("Noise 2 Mask", 1) == "M01" && a.text ("Noise 2 Mask", 16) == "M16");
     CHECK (a.text ("CV 1 Amt", -128) == "-128" && a.text ("CV 1 Amt", 127) == "+127" && a.text ("CV 4 In", 5.0) == "5.00 V");
     CHECK (a.text ("LFO 2 Wave", 15) == "Pulse 12" && a.text ("LFO 1 Clock", 4) == "1/4" && a.text ("CV 2 Dest", 16) == "Accent");
-    CHECK (a.text ("Split Mode", 6) == "C1-F3" && a.text ("Pitch Mode", 0) == "Linear");
+    CHECK (a.value ("Split Mode") == 6.0 && a.text ("Split Mode", 6) == "C1-F3" && a.text ("Pitch Mode", 0) == "Linear");
     CHECK (a.valueOf ("Metal Noise 1", "Noise") == 1.0 && a.valueOf ("Noise 2 Mask", "M07") == 7.0 && a.valueOf ("LFO 1 Mode", "One Shot") == 2.0);
     CHECK_NEAR (a.valueOf ("Pitch", "175 Hz"), 1.0, 1e-5);
     CHECK_NEAR (a.valueOf ("Decay", "2 s"), 1.0, 1e-5);
@@ -488,6 +488,7 @@ void testState()
     CHECK (load (c, other));
     CHECK_NEAR (c.value ("Harmonics"), 0.9, 1e-6);
     CHECK (c.value ("Pitch") == 0.5623f);
+    CHECK (c.value ("Split Mode") == 0.0); // omitted in a v1 state
     std::vector<uint8_t> wrong = { 'A', 'N', 'V', 'L', 1, 0, 0, 0, 0, 0, 0, 0 };
     CHECK (! load (c, wrong));
 }
@@ -503,17 +504,17 @@ const std::vector<Demo>& demos()
 {
     static const std::vector<Demo> list {
         { "default", {}, {} },
-        { "gut-punch", { { "Tune", 0.7 }, { "Pitch", 0.576 }, { "Decay", 0.62 }, { "Harmonics", 0.2 }, { "Pulse", 0.7 }, { "Noise", 0.25 },
+        { "gut-punch", { { "Split Mode", 0 }, { "Tune", 0.7 }, { "Pitch", 0.576 }, { "Decay", 0.62 }, { "Harmonics", 0.2 }, { "Pulse", 0.7 }, { "Noise", 0.25 },
                          { "Attack", 0.7 }, { "EQ", 0.25 }, { "Gate Time", 0.25 }, { "Compression", 0.1 } }, {} },
-        { "soft-boom", { { "Tune", 0.15 }, { "Pitch", 0.5255 }, { "Decay", 0.85 }, { "Harmonics", 0.0 }, { "Pulse", 0.2 }, { "Noise", 0.05 },
+        { "soft-boom", { { "Split Mode", 0 }, { "Tune", 0.15 }, { "Pitch", 0.5255 }, { "Decay", 0.85 }, { "Harmonics", 0.0 }, { "Pulse", 0.2 }, { "Noise", 0.05 },
                          { "Attack", 0.3 }, { "EQ", 0.8 }, { "Gate Time", 0.2 } }, {} },
-        { "sub-drop", { { "Tune", 0.4 }, { "Pitch", 0.3838 }, { "Decay", 0.95 }, { "Harmonics", 0.05 }, { "Pulse", 0.3 }, { "Noise", 0.0 },
+        { "sub-drop", { { "Split Mode", 0 }, { "Tune", 0.4 }, { "Pitch", 0.3838 }, { "Decay", 0.95 }, { "Harmonics", 0.05 }, { "Pulse", 0.3 }, { "Noise", 0.0 },
                         { "Attack", 0.2 }, { "EQ", 0.6 } }, {} },
-        { "clap-kick", { { "Tune", 0.45 }, { "Decay", 0.5 }, { "Pulse", 0.5 }, { "Noise", 0.8 }, { "Attack", 0.85 }, { "EQ", 0.05 }, { "Gate Time", 0.95 } }, {} },
-        { "metal-kick", { { "Tune", 0.6 }, { "Decay", 0.55 }, { "Harmonics", 0.4 }, { "Noise", 0.7 }, { "Attack", 0.7 }, { "EQ", 0.1 }, { "Gate Time", 0.6 },
+        { "clap-kick", { { "Split Mode", 0 }, { "Tune", 0.45 }, { "Decay", 0.5 }, { "Pulse", 0.5 }, { "Noise", 0.8 }, { "Attack", 0.85 }, { "EQ", 0.05 }, { "Gate Time", 0.95 } }, {} },
+        { "metal-kick", { { "Split Mode", 0 }, { "Tune", 0.6 }, { "Decay", 0.55 }, { "Harmonics", 0.4 }, { "Noise", 0.7 }, { "Attack", 0.7 }, { "EQ", 0.1 }, { "Gate Time", 0.6 },
                           { "Metal Noise 1", 337 }, { "Metal Noise 2", 77 }, { "Noise 2 Mask", 12 } }, {} },
-        { "wobble-tail", { { "Tune", 0.35 }, { "Pitch", 0.5 }, { "Decay", 0.9 }, { "LFO 1 Wave", 2 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } }, {} },
-        { "zap", { { "Tune", 0.3 }, { "Decay", 0.55 }, { "Harmonics", 0.3 }, { "LFO 1 Wave", 1 }, { "LFO 1 Speed", 0.75 }, { "LFO 1 Int", 0.6 }, { "LFO 1 Mode", 2 } }, {} },
+        { "wobble-tail", { { "Split Mode", 0 }, { "Tune", 0.35 }, { "Pitch", 0.5 }, { "Decay", 0.9 }, { "LFO 1 Wave", 2 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } }, {} },
+        { "zap", { { "Split Mode", 0 }, { "Tune", 0.3 }, { "Decay", 0.55 }, { "Harmonics", 0.3 }, { "LFO 1 Wave", 1 }, { "LFO 1 Speed", 0.75 }, { "LFO 1 Int", 0.6 }, { "LFO 1 Mode", 2 } }, {} },
         { "bass-line", { { "Split Mode", 6 }, { "Pitch Mode", 1 }, { "Pitch", 0.4139 }, { "Tune", 0.1 }, { "Decay", 0.8 }, { "Harmonics", 0.5 },
                          { "Pulse", 0.15 }, { "Noise", 0.0 }, { "Attack", 0.2 }, { "EQ", 0.35 } },
           { { 0, 36 }, { 6000, 36, 0.6 }, { 12000, 48 }, { 18000, 43, 0.7 }, { 24000, 39 }, { 36000, 46, 0.8 }, { 42000, 36 }, { 48000, 51, 0.6 },
@@ -845,9 +846,12 @@ void testSplitAndPitchMode()
 {
     const Settings base = clean ({ { "Pitch", 0.5623 } });
     auto with = [&] (Settings more, int key) { Settings s = base; s.insert (s.end(), more.begin(), more.end()); return kick (s, { { 0, key } }, 1.0); };
-    // Any Note: every key plays the kick as set.
+    // Fresh instances use C1-F3 and play the lowest key at the base pitch.
     const auto c1 = with ({}, 36);
-    CHECK (same (c1, with ({}, 0)) && same (c1, with ({}, 100)));
+    CHECK (peak (with ({}, 65), 0, 4800) > 0.0f);
+    CHECK (peak (with ({}, 35), 0, 4800) == 0.0f && peak (with ({}, 66), 0, 4800) == 0.0f);
+    // Any Note: every key plays the kick as set.
+    CHECK (same (c1, with ({ { "Split Mode", 0 } }, 0)) && same (c1, with ({ { "Split Mode", 0 } }, 100)));
     // C1: only C1.
     CHECK (same (c1, with ({ { "Split Mode", 1 } }, 36)));
     CHECK (peak (with ({ { "Split Mode", 1 } }, 37), 0, 48000) == 0.0f);
@@ -950,8 +954,9 @@ void testSameFrame()
             CHECK (same (low, play (split, { hit (f, 1.0, 36), hit (f, 0.3, 48) })));
             CHECK (same (low, play (split, { hit (f, 0.3, 48), hit (f, 1.0, 36) })));
             CHECK (same (play (split, { hit (f, 1.0, 48) }), play (split, { hit (f, 1.0, 36), hit (f, 1.0, 48) }))); // equal: the later
-            CHECK (same (loud, play (busy, { hit (f, 1.0, 40), hit (f, 0.3, 41), choke (f + 2000, 41) })));
-            CHECK (same (loud, play (busy, { hit (f, 0.3, 41), hit (f, 1.0, 40), choke (f + 2000, 41) })));
+            const auto accent = play (busy, { hit (f, 1.0, 40) });
+            CHECK (same (accent, play (busy, { hit (f, 1.0, 40), hit (f, 0.3, 41), choke (f + 2000, 41) })));
+            CHECK (same (accent, play (busy, { hit (f, 0.3, 41), hit (f, 1.0, 40), choke (f + 2000, 41) })));
             // A knob moved between the two: the louder takes the knobs as they are at it, as if the softer had not come
             // (nothing of the softer stays: not its LFO retrigger); a hit the Accent CV left softer is the one left out.
             CHECK (same (play (busy, { set (f, "Pitch", 0.9), hit (f, 1.0) }), play (busy, { hit (f, 0.3), set (f, "Pitch", 0.9), hit (f, 1.0) })));
@@ -976,7 +981,7 @@ void testSameFrame()
 // A choke (Melodee's all sound off, a cut group) stops the hit its key played, on its frame; another key's does not.
 void testChoke()
 {
-    const Settings base = clean ({ { "Pitch", 1.0 } });
+    const Settings base = clean ({ { "Pitch", 1.0 }, { "Split Mode", 0 } });
     auto run = [&] (int playKey, int chokeKey, bool play = false) {
         Instance a;
         a.setup (base);

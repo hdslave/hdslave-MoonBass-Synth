@@ -5,6 +5,8 @@ Separate desktop CLAP build of **hdslave MoonBass** for **FL Studio** (2024+) an
 - **Multi-Screen MPC Dashboard:** displays all of hdslave MoonBass's native MPC screens simultaneously on one resizable Retina/HiDPI panel (with the hardware `K1`–`K3` footer panels removed) and direct mouse, trackpad, and touch control over every parameter, plot, sequencer, and pad.
 - **Standalone from the MPC Sample build:** this directory is completely separate from the MPC Sample build in the repository root (`../src`, `../build.sh`). GitHub releases remain MPC Sample-only for now while the desktop builds are being finalized.
 
+Version 0.1.6 starts new instances and the Default preset with **Split Mode** at **C1-F3**.
+
 ## Build & Install (macOS)
 
 Requires Xcode Command Line Tools and CMake 3.20+ (Ninja optional):

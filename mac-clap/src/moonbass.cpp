@@ -353,6 +353,8 @@ bool stateLoad (const clap_plugin* plugin, const clap_istream* stream)
     float loaded[paramCount];
     for (uint32_t i = 0; i < paramCount; ++i)
         loaded[i] = paramTable[i].def;
+    // Sparse v1 states used Any Note when they omitted Split Mode.
+    loaded[ParamId::splitMode] = splitAnyNote;
     for (uint32_t i = 0; i < header[1]; ++i)
     {
         struct { uint32_t id; float value; } pair {};

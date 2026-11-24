@@ -286,11 +286,26 @@ bool testOnePlugin (const std::string& clapPath, const std::string& snapDir)
     if (!params) return false;
     const uint32_t pCount = params->count (plug);
     std::set<std::string> modules;
+    bool expectedParam = std::strcmp (desc->id, "com.hdslave.moonbass") != 0;
     for (uint32_t i = 0; i < pCount; ++i)
     {
         clap_param_info_t info {};
         if (params->get_info (plug, i, &info))
+        {
             modules.insert (info.module);
+            if (std::strcmp (info.name, "Split Mode") == 0)
+            {
+                double current = -1.0;
+                char label[16] = {};
+                expectedParam = info.default_value == 6.0 && params->get_value (plug, info.id, &current) && current == 6.0
+                    && params->value_to_text (plug, info.id, current, label, sizeof (label)) && std::strcmp (label, "C1-F3") == 0;
+            }
+        }
+    }
+    if (!expectedParam)
+    {
+        std::fprintf (stderr, "FAIL: missing or incorrect Split Mode parameter\n");
+        return false;
     }
 
     // 3. Verify CLAP_EXT_STATE round-trip

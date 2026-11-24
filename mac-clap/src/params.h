@@ -13,7 +13,7 @@
 #include <strings.h>
 
 #ifndef MOONBASS_VERSION
-#define MOONBASS_VERSION "0.1.4"
+#define MOONBASS_VERSION "0.1.6"
 #endif
 
 namespace moonbass
@@ -104,6 +104,7 @@ static_assert (sizeof (lfoClockBeats) / sizeof (lfoClockBeats[0]) == sizeof (lfo
 // Split Mode: which keys play and from which the pitch counts. Any Note (new: any pad plays the kick as set), then
 // the ModBase 09's SM1-SM5 and the MBase 11's SM2.
 inline const char* const splitChoices[] = { "Any Note", "C1", "C1-C2", "C2-C3", "C3-C4", "C1-C6", "C1-F3" };
+constexpr int splitAnyNote = 0, splitC1F3 = 6;
 struct KeyRange { int16_t low, high; };
 inline constexpr KeyRange splitRanges[] = { { 0, 127 }, { 36, 36 }, { 36, 48 }, { 48, 60 }, { 60, 72 }, { 36, 96 }, { 36, 65 } };
 inline const char* const pitchModeChoices[] = { "Linear", "Semitones" };
@@ -157,7 +158,7 @@ inline constexpr Param paramTable[] = {
     CHOICE (lfo2Mode, "LFO 2 Mode", "LFO 2", lfoModeChoices, 1.0f),
     CHOICE (lfo2Clock, "LFO 2 Clock", "LFO 2", lfoClockChoices, 0.0f),
     // 10: how notes play it
-    CHOICE (splitMode, "Split Mode", "Play", splitChoices, 0.0f),
+    CHOICE (splitMode, "Split Mode", "Play", splitChoices, splitC1F3),
     CHOICE (pitchMode, "Pitch Mode", "Play", pitchModeChoices, 1.0f),
     CONT (dynamics, "Dynamics", "Play", 0.0f, 1.0f, 1.0f, percent),
     // 11-14: the CV inputs, each with its destination and amount

@@ -10,7 +10,7 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
-Version 0.1.5. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+Version 0.1.6. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
 
 In 0.1.4, a page Play is taken with the block's first-frame events (never after the
 transport) and its age counts audio frames rather than wall-clock time, so a sleeping host still auditions it;
@@ -112,7 +112,7 @@ and the LFOs** move while a kick sounds.
 
 ### Notes and velocity
 
-A note plays the kick if Split Mode takes its key. A note off does nothing: Gate Time is the gate. The level is the
+New instances and the Default preset start with Split Mode at C1-F3. A note plays the kick if Split Mode takes its key. A note off does nothing: Gate Time is the gate. The level is the
 velocity as far as Dynamics lets it, times the Accent CV, times the gate's charge (a short gate puts less into the
 envelope). A new hit restarts the VCO's phase and the envelopes over whatever still sounds, as one voice does.
 
@@ -124,7 +124,7 @@ its pitch. A frame apart, both play.
 A choke stops the hit its key played, on its frame (a choke of any key, -1, stops whatever plays), and so does MIDI's
 All Sound Off (CC 120 at 0). Melodee sends both when it silences a track.
 
-- **Any Note** (the default) suits a drum track: every pad plays the kick as set.
+- **Any Note** suits a drum track: every pad plays the kick as set.
 - **C1-C2** with **Linear** is the ModBase 09's way: the eight pads of a Melodee drum track (notes 36-43) play eight
   tunings of one kick.
 - **C1-F3** with **Semitones** and a long Decay is the MBase 11's way to play bass lines.
