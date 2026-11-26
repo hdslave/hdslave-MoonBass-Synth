@@ -1347,7 +1347,7 @@ void testScreen()
     CHECK (draw() && region (0, 45, 164, 122) != globe && paints > beforeAnimation);
     c.time_ms += 60;
     CHECK (draw()); // two frames into the pulse, without another audio block
-    c.time_ms += 200;
+    c.time_ms += 700; // past the longest shock (560 ms)
     CHECK (draw() && memory == rest);
     const int resting = paints;
     CHECK (!draw() && paints == resting);
@@ -1364,6 +1364,157 @@ void testScreen()
     for (int j = 0; j < 218; ++j)
         for (int x = 320; x < stride; ++x) CHECK (memory[j * stride + x] == guard);
 }
+// The shockwave a hit sets off on the globe panel. It is drawn from the hit's age alone: at every frame a repeated
+// paint touches nothing and a whole paint draws what the partial one did. It never leaves the globe panel. It lasts
+// longer for a longer Decay (240-560 ms), asks for its next frame until then, and ends on the resting pixels. Its size
+// follows the hit's level. A hit while the page was away, or a clock that runs backwards, shows nothing.
+void testShockwave()
+{
+    constexpr int stride = 321;
+    std::vector<uint32_t> memory (stride * 218, 0);
+    auto region = [&] (const std::vector<uint32_t>& from, int x, int y, int w, int h) {
+        std::vector<uint32_t> pixels;
+        for (int j = y; j < y + h; ++j)
+            pixels.insert (pixels.end(), from.begin() + j * stride + x, from.begin() + j * stride + x + w);
+        return pixels;
+    };
+    // Everything but the globe panel (0, 45, 164 x 122).
+    auto aside = [&] (const std::vector<uint32_t>& from) {
+        auto pixels = region (from, 0, 0, 320, 45), below = region (from, 0, 167, 320, 51), right = region (from, 164, 45, 156, 122);
+        pixels.insert (pixels.end(), below.begin(), below.end());
+        pixels.insert (pixels.end(), right.begin(), right.end());
+        return pixels;
+    };
+    struct Page
+    {
+        Instance a;
+        const melodee_screen_t* page = nullptr;
+        melodee_screen_frame_t c {};
+    };
+    auto open = [&] (Page& p, Settings settings) {
+        p.a.setup (settings);
+        p.page = static_cast<const melodee_screen_t*> (p.a.plugin->get_extension (p.a.plugin, MELODEE_SCREEN_CLAP));
+        p.c.pixels = memory.data();
+        p.c.width = 320, p.c.height = 218, p.c.stride = stride, p.c.area = MELODEE_SCREEN_PAGE, p.c.time_ms = 5000;
+        for (int k = 0; k < 3; ++k) p.c.pots[k] = -1;
+    };
+    auto draw = [&] (Page& p, bool whole = false) { p.c.redraw_all = whole ? 1u : 0u; return p.page->draw (p.a.plugin, &p.c); };
+    auto globe = [&] { return region (memory, 0, 45, 164, 122); };
+    auto differing = [&] (const std::vector<uint32_t>& x, const std::vector<uint32_t>& y) {
+        int n = 0;
+        for (size_t i = 0; i < x.size(); ++i) n += x[i] != y[i];
+        return n;
+    };
+
+    // How long a hit keeps asking for frames, at 1 ms steps; every frame checked as above.
+    auto ringing = [&] (Settings settings) {
+        Page p;
+        open (p, settings);
+        CHECK (draw (p, true));
+        const auto rest = memory, restGlobe = globe(), restAside = aside (memory);
+        p.a.play ({ { 0 } }, 0.01);
+        const uint64_t hit = p.c.time_ms;
+        int lasted = -1, shown = 0;
+        for (int age = 0; age < 700; ++age)
+        {
+            p.c.time_ms = hit + (uint64_t) age;
+            const int before = paints;
+            draw (p);
+            const auto partial = memory;
+            CHECK (! draw (p));
+            CHECK (draw (p, true) && memory == partial);
+            CHECK (aside (memory) == restAside);
+            shown += globe() != restGlobe;
+            if (paints > before) lasted = age;
+        }
+        CHECK (memory == rest && ! draw (p));
+        CHECK (shown > lasted / 2 && shown <= lasted + 1);
+        return lasted;
+    };
+    const int usual = ringing ({}), longest = ringing ({ { "Decay", 1.0 } }), shortest = ringing ({ { "Decay", 0.0 } });
+    CHECK (usual >= 239 && usual < 560 && longest > usual && longest < 560 && shortest >= 239 && shortest < usual);
+
+    // A soft hit throws a smaller wave than a full one (Dynamics 100 %: velocity is the level).
+    auto lit = [&] (double velocity, int age) {
+        Page p;
+        open (p, { { "Dynamics", 1.0 } });
+        draw (p, true);
+        const auto restGlobe = globe();
+        p.a.play ({ { 0, 36, velocity } }, 0.01);
+        draw (p);
+        p.c.time_ms += (uint64_t) age;
+        draw (p);
+        return differing (globe(), restGlobe);
+    };
+    for (int age : { 20, 60, 120 })
+        CHECK (lit (0.2, age) < lit (1.0, age) && lit (0.2, age) > 0);
+
+    {
+        // The gate's charge is the sound's, not the wave's: a full hit draws the same wave at the shortest and the
+        // longest Gate Time. A hit the Accent CV silences (Accent 0) draws nothing and asks for no frames.
+        auto globeAt = [&] (Settings settings, int age) {
+            Page p;
+            open (p, settings);
+            draw (p, true);
+            p.a.play ({ { 0 } }, 0.01);
+            draw (p);
+            p.c.time_ms += (uint64_t) age;
+            draw (p);
+            return globe();
+        };
+        for (int age : { 0, 20, 60, 150 })
+            CHECK (globeAt ({ { "Gate Time", 0.0 } }, age) == globeAt ({ { "Gate Time", 1.0 } }, age));
+        Page p;
+        open (p, { { "CV 1 Dest", 16 }, { "CV 1 Amt", -128 }, { "CV 1 In", 5.0 } });
+        draw (p, true);
+        const auto restGlobe = globe();
+        const auto silent = p.a.play ({ { 0 } }, 0.01);
+        CHECK (peak (silent, 0, silent.size()) == 0.0f);
+        const int before = paints;
+        draw (p);
+        CHECK (globe() == restGlobe && paints == before);
+    }
+    {
+        // A hit while the page was away: it opens on the resting globe and asks for nothing.
+        Page p;
+        open (p, {});
+        draw (p, true);
+        const auto restGlobe = globe();
+        p.a.play ({ { 0 } }, 0.01);
+        const int before = paints;
+        CHECK (draw (p, true) && globe() == restGlobe && paints == before);
+        p.c.time_ms += 30;
+        CHECK (! draw (p));
+        // A clock behind the hit's (a host restarted it) shows the resting globe, and then the shock at its time.
+        p.a.play ({ { 0 } }, 0.01);
+        draw (p);
+        p.c.time_ms -= 1000;
+        draw (p);
+        CHECK (globe() == restGlobe);
+        p.c.time_ms += 1050;
+        draw (p);
+        CHECK (globe() != restGlobe);
+    }
+    {
+        // Rolls: a hit every 25 ms rings four shocks at once (a fifth takes the oldest's place), and all of them end
+        // within the last one's life.
+        Page p;
+        open (p, { { "Decay", 1.0 } });
+        draw (p, true);
+        const auto rest = memory;
+        for (int n = 0; n < 9; ++n)
+        {
+            p.a.play ({ { 0 } }, 0.01);
+            CHECK (draw (p));
+            const auto partial = memory;
+            CHECK (draw (p, true) && memory == partial);
+            p.c.time_ms += 25;
+        }
+        p.c.time_ms += 560;
+        CHECK (draw (p) && memory == rest && ! draw (p));
+    }
+}
+
 // An event stamped past the block (a host's mistake) is applied at the block's end; anything it makes the plug-in
 // tell the host must still carry a time inside the block.
 void testOutputTimeClamp()
@@ -1597,6 +1748,7 @@ int main (int argc, char** argv)
     testDescription();
     testParameters();
     testScreen();
+    testShockwave();
     testPushThenLoad();
     testState();
     testPresets (argv[2]);

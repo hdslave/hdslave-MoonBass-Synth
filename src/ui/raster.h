@@ -90,18 +90,21 @@ public:
         static_assert (W * H <= capacity);
         if (! ensure()) return false;
         Raster r { scratch.get(), W, H };
-        std::fill_n (scratch.get(), W * H, background);
+        clear<W * H> (scratch.get());
         draw (r);
         bool touched = false;
         for (int j = 0; j < H; ++j)
         {
             auto* old = prior.get() + (y + j) * width + x;
             const auto* row = scratch.get() + j * W;
-            if (! whole && std::memcmp (old, row, W * sizeof (Ink)) == 0) continue;
             int left = 0, right = W;
             if (! whole)
             {
-                while (old[left] == row[left]) ++left;
+                // The first and last pixels that differ, found eight pixels (two 16-byte loads a side) at a time.
+                while (left + 8 <= W && same8 (old + left, row + left)) left += 8;
+                while (left < W && old[left] == row[left]) ++left;
+                if (left == W) continue;
+                while (right - 8 >= left && same8 (old + right - 8, row + right - 8)) right -= 8;
                 while (old[right - 1] == row[right - 1]) --right;
             }
             std::copy (row + left, row + right, old + left);
@@ -112,6 +115,22 @@ public:
     }
 
 private:
+
+    static uint64_t two (const Ink* p) { uint64_t v; std::memcpy (&v, p, sizeof (v)); return v; }
+    static bool same8 (const Ink* a, const Ink* b)
+    {
+        return ((two (a) ^ two (b)) | (two (a + 2) ^ two (b + 2)) | (two (a + 4) ^ two (b + 4)) | (two (a + 6) ^ two (b + 6))) == 0;
+    }
+
+    // The background, sixteen pixels a step (W * H is a multiple of four for every region: the rest pixel by pixel).
+    template<int N>
+    static void clear (Ink* p)
+    {
+        int i = 0;
+        for (; i + 16 <= N; i += 16)
+            for (int k = 0; k < 16; ++k) p[i + k] = background;
+        for (; i < N; ++i) p[i] = background;
+    }
     bool ensure()
     {
         if (prior) return true;

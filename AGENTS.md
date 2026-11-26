@@ -43,3 +43,4 @@ Read `../AGENTS.md`, then `../Workflow/plugins.md` and `../Workflow/host-facts.m
 - **MIDI CC map.** CC 120, 121 and 123 at value 0 are channel mode, never parameter changes. `NOTE_CHOKE` stops the hit its key played.
 - **Same-frame triggers.** Two triggers on one frame keep the louder one; on a tie, the later one.
 - The parameter count stays a multiple of three (a `static_assert`).
+- **The page's shockwave** (`src/ui/shockwave.h`) is drawn from each hit's age alone, so a repeated paint touches nothing and a whole repaint equals a partial one (`testShockwave`). It draws only with the page's inks (`inks` in `src/screen.h`: the art's palette, the page's colours and mixes of two of them). `build/page` (`make page`) renders its frames outside a host; `tools/bench.sh` counts a frame's instructions.

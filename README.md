@@ -19,7 +19,10 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
-Version 0.1.6. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+Version 0.1.7. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+
+In 0.1.7, a hit sets off a shockwave around the moon on the Orbital Impact page (below). The sound is unchanged to
+the bit; MoonBass has still not been run on the MPC.
 
 In 0.1.4, a page Play is taken with the block's first-frame events (never after the
 transport) and its age counts audio frames rather than wall-clock time, so a sleeping host still auditions it;
@@ -44,7 +47,15 @@ CV 1-4 In × Amt ──► any of 16 destinations          velocity (Dynamics) �
 
 ## Orbital Impact
 
-In hdslaveOS, MoonBass draws a wireframe moon on Melodee’s Edit and Stage plug-in pages. A kick briefly flattens the mesh. The orange graph previews the first 100 ms of pitch sweep above the resting note. The violet graph shows the gate hold and amplitude decay, including the effect of Compression. Both graphs follow the patch and its CV settings. The amplitude graph’s time scale changes for long tails.
+In hdslaveOS, MoonBass draws a wireframe moon on Melodee’s Edit and Stage plug-in pages. A kick briefly flattens the mesh and sets off a shockwave:
+- the moon flashes, its orange climbing towards cream and its dark inside taking on the page's lilac;
+- a thin cream and violet pressure wave races out to the panel's edge, lighting the grid lines it crosses and leaving a dithered wake;
+- a blast sweeps out in the plane of the moon's own ring, an orange band with a cream edge printed over a violet misregistration, its far half behind the moon and its near half across it;
+- sparks fly out from behind the moon.
+
+The harder the hit (velocity through Dynamics, and Accent), the bigger and brighter the wave, whatever the Gate Time; a soft hit throws a small, dim one, flattens the moon less and only warms it, and a hit that makes no sound draws nothing. A longer Decay makes it ring longer (240-560 ms; about 310 ms at the default). Fast rolls keep up to four waves going at once. Every colour is the page's own (the moon art's orange ramp and cream, the page's lilac) or a mix of two of them. `make page` builds `build/page`, which draws the page outside a host and renders a hit's frames (`build/page render DIR LEVEL STEP_MS COUNT`).
+
+The orange graph previews the first 100 ms of pitch sweep above the resting note. The violet graph shows the gate hold and amplitude decay, including the effect of Compression. Both graphs follow the patch and its CV settings. The amplitude graph’s time scale changes for long tails.
 
 ![MoonBass in Melodee’s Edit page](docs/orbital-impact.png)
 
@@ -247,6 +258,14 @@ silent blocks while it stands still). Memoising the VCO's pitch step the same wa
 with hits 13 ms apart the pitch envelope moves it every frame, so the test cost more than it saved in the
 worst case (70,610 instructions a block with it, 69,842 without). The build with Orbital Impact is 195 KiB stripped.
 
+The page is painted on Melodee's screen thread, never the audio one. `tools/bench.sh` also counts its instructions a
+frame (`build/page`, a frame every 16 ms): about 780 at rest, about 157,000 for each frame a hit animates, and about
+291,000 with four accented shockwaves at once (under 0.2 ms on an A55 core; Melodee asks for under 2 ms). The 0.1.6
+page, with only the flattening, took about 416,000 a frame while it moved. The moon is now drawn from its runs of
+solid pixels (7,281 of its 18,408), a byte a pixel, both worked out from the art when compiling, with no division a
+pixel; the grid is drawn a row at a time; and a repaint finds the first and last changed pixel of a row eight at a
+time. Every frame lands on the same pixels as before (checked frame by frame against the slower code).
+
 ## Build and test
 
 Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `melodee-builder` image by default).
@@ -257,11 +276,12 @@ Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `mel
 tools/bench.sh      # instruction counts (Melodee's melodee-profiler image)
 ```
 
-The tests load the plug-in through the CLAP API and check (about 465,000 checks):
+The tests load the plug-in through the CLAP API and check (about 474,000 checks):
 - the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
 - the screen’s 14 sets of knob bindings, pitch and amp graphs, pot pickup, host edits, audition wakeup and presses surviving a sleeping host, hit animation and idle redraws;
+- the shockwave, at every millisecond of a hit: a repeated paint touches nothing, a whole repaint equals the partial one, nothing outside the globe panel changes, it asks for frames only while it moves and ends on the resting pixels; a longer Decay rings longer, a full hit draws the same wave at the shortest and longest Gate Time, a soft hit draws less, a hit while the page was away shows nothing, a clock running backwards shows the resting globe until it catches up, and a roll of nine hits 25 ms apart ends at rest;
 - state save and load (and another version's state);
 - the presets, as preset discovery lists them and preset-load loads them;
 - hits landing on their frame at 44.1, 48 and 96 kHz and block sizes 1, 37, 128 and 4096;

@@ -49,6 +49,7 @@ struct Plugin
     std::atomic<bool> settleLoad { false }; // a state or preset loaded: settle the glides at the next block
     double sampleRate = 48000.0;
     std::atomic<uint32_t> hits { 0 };
+    std::atomic<float> hitStrength { 1.0f }; // the newest hit's strength (Engine::lastHitStrength), stored before `hits`
     bool valuesMoved = false; // coalesce host automation and MIDI into one repaint per block
     bool active = false;
 };
@@ -574,6 +575,7 @@ clap_process_status pluginProcess (const clap_plugin* plugin, const clap_process
     p.framesDone.store (blockStart + (int64_t) frames, std::memory_order_release);
     if (p.hostScreen && (p.valuesMoved || p.hits.load (std::memory_order_relaxed) != p.engine.hitCount()))
     {
+        p.hitStrength.store (p.engine.lastHitStrength(), std::memory_order_relaxed);
         p.hits.store (p.engine.hitCount(), std::memory_order_release);
         requestPaint (p);
     }
@@ -589,7 +591,8 @@ bool screenDraw (const void* plugin, const melodee_screen_frame_t* c)
     if (!plugin || !c || !c->pixels || c->area != MELODEE_SCREEN_PAGE || c->width != hdui::width || c->height != hdui::height || c->stride < c->width)
         return false;
     auto& p = of (static_cast<const clap_plugin*> (plugin));
-    const bool drew = p.screen.paint (*c, p.values, p.hits.load (std::memory_order_acquire));
+    const uint32_t hits = p.hits.load (std::memory_order_acquire);
+    const bool drew = p.screen.paint (*c, p.values, hits, p.hitStrength.load (std::memory_order_relaxed));
     if (p.screen.animating()) requestPaint (p); // the next frame even after audio processing stops
     return drew;
 }

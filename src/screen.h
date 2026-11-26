@@ -5,28 +5,119 @@
 #include "params.h"
 #include "ui/orbital_art.h"
 #include "ui/raster.h"
+#include "ui/shockwave.h"
 #include <array>
 #include <atomic>
 #include <cctype>
 
 namespace moonbass
 {
+// The page's inks, besides the art's own palette (art::palette: the moon's orange ramp, its greys and cream).
+namespace inks
+{
+using hdui::Ink;
+constexpr Ink orange = 0xffff7131, lilac = 0xffbc99f5, paper = 0xfffff4db;
+constexpr Ink muted = 0xffd0b4e7, grid = 0xff3d3046, panel = 0xff241d32, globeGrid = 0xff352c56;
+
+// The moon as a hit lights it (`steps` 2) and as it cools (1): its orange climbs that many steps of the art's ramp
+// (past the top: cream), its greys as many towards cream, and the dark inside takes on the page's lilac.
+constexpr std::array<Ink, 16> flash (int steps)
+{
+    const Ink* a = art::palette;
+    std::array<Ink, 16> ink {};
+    ink[1] = a[1];
+    ink[2] = hdui::mix (a[2], lilac, steps, 8);
+    ink[3] = hdui::mix (a[3], lilac, steps, 5);
+    for (int i = 4; i <= 10; ++i) ink[i] = a[i + steps <= 10 ? i + steps : 15];
+    for (int i = 11; i <= 15; ++i) ink[i] = a[std::min (i + steps, 15)];
+    return ink;
+}
+
+// The shockwave's ramps: the ring's cream edge and its orange band step down the art's ramp; the violet, the grid's
+// lights and the wake are the page's lilac mixed towards the background or the globe's grid.
+constexpr hdui::ShockInks shock()
+{
+    const Ink* a = art::palette;
+    hdui::ShockInks s {};
+    const Ink edge[6] = { a[15], a[10], a[9], a[8], a[7], a[6] };
+    const Ink glow[6] = { paper, muted, lilac, hdui::mix (lilac, globeGrid, 1, 3), hdui::mix (lilac, globeGrid, 2, 3), globeGrid };
+    for (int k = 0; k < 6; ++k)
+    {
+        s.edge[k] = edge[k];
+        s.body[k] = a[8 - k];
+        s.violet[k] = hdui::mix (lilac, hdui::background, k, 7);
+        s.glow[k] = glow[k];
+        s.wake[k] = hdui::mix (lilac, hdui::background, 14 + k, 20);
+    }
+    return s;
+}
+inline constexpr hdui::ShockInks shockInks = shock();
+} // namespace inks
+
+// The moon's runs of non-clear pixels, row by row, found from the art when compiling: at most two a row (the sphere
+// and an end of its ring), 7,281 of its 18,408 pixels. The moon is drawn from these alone.
+struct MoonRuns
+{
+    static constexpr int w = 156, h = 118, most = 2;
+    uint8_t count[h] {}, from[h][most] {}, to[h][most] {};
+    bool fits = true;
+};
+constexpr MoonRuns findMoonRuns()
+{
+    MoonRuns runs {};
+    for (int y = 0; y < MoonRuns::h; ++y)
+    {
+        auto clear = [y] (int x) { return ((art::moon[y * MoonRuns::w / 2 + x / 2] >> ((x & 1) ? 0 : 4)) & 15) == 0; };
+        for (int x = 0; x < MoonRuns::w;)
+        {
+            if (clear (x)) { ++x; continue; }
+            const int start = x;
+            while (x < MoonRuns::w && ! clear (x)) ++x;
+            const int n = runs.count[y]++;
+            if (n < MoonRuns::most) runs.from[y][n] = (uint8_t) start, runs.to[y][n] = (uint8_t) (x - 1);
+            else runs.fits = false;
+        }
+    }
+    return runs;
+}
+inline constexpr MoonRuns moonRuns = findMoonRuns();
+
+// The moon's pixels a byte each (its palette index), unpacked from the art's nibbles when compiling.
+struct MoonPixels
+{
+    uint8_t at[MoonRuns::h][MoonRuns::w] {};
+};
+constexpr MoonPixels unpackMoon()
+{
+    MoonPixels m {};
+    for (int y = 0; y < MoonRuns::h; ++y)
+        for (int x = 0; x < MoonRuns::w; ++x)
+            m.at[y][x] = (uint8_t) ((art::moon[y * MoonRuns::w / 2 + x / 2] >> ((x & 1) ? 0 : 4)) & 15);
+    return m;
+}
+inline constexpr MoonPixels moonPixels = unpackMoon();
+static_assert (moonRuns.fits, "a moon row with more runs than MoonRuns::most: raise it");
+
 class Screen
 {
     using Ink = hdui::Ink;
     using Raster = hdui::Raster;
-    static constexpr Ink orange = 0xffff7131, lilac = 0xffbc99f5, paper = 0xfffff4db;
-    static constexpr Ink muted = 0xffd0b4e7, grid = 0xff3d3046, panel = 0xff241d32;
+    static constexpr Ink orange = inks::orange, lilac = inks::lilac, paper = inks::paper;
+    static constexpr Ink muted = inks::muted, grid = inks::grid, panel = inks::panel;
     static constexpr int pages = paramCount / 3;
     static_assert (paramCount % 3 == 0, "a page holds three parameters: one added alone would not be reachable");
     hdui::Picture picture;
     std::array<float, ParamId::count> values {};
-    int page = 0, lastPage = -1, lastPulse = -1;
+    int page = 0, lastPage = -1;
     int16_t lastKnobs[3] { -1, -1, -1 };
     bool lastKnobsLive[3] {};
-    bool lastShift = false, pulsing = false;
+    bool lastShift = false, moving = false;
     uint32_t seenHits = 0;
     uint64_t hitAt = 0;
+    int kick = 0;      // the newest hit's squash, in pixels each side
+    bool soft = false; // the newest hit was soft: it warms the moon but never makes it hot
+    hdui::Shockwave shock { inks::shockInks };
+    static constexpr std::array<Ink, 16> hot = inks::flash (2), warm = inks::flash (1);
 
     static void sprite (Raster& r, const uint8_t* data, int stride, int srcX, int w, int h,
                         int x, int y, int destW, int destH)
@@ -40,6 +131,53 @@ class Screen
                 const int sx = srcX + (destW == w ? i : source / destW);
                 const int colour = (row[sx / 2] >> ((sx & 1) ? 0 : 4)) & 15;
                 if (colour) r.dot (x + i, y + j, art::palette[colour]);
+            }
+        }
+    }
+
+    // The moon at destW x destH, clipped to the raster: the pixels sprite() would draw (each takes the source pixel
+    // floor (i * 156 / destW) along, floor (j * 118 / destH) down), but only along its runs, so the clear pixels cost
+    // nothing and nothing is divided a pixel. Each column's source is stepped by a remainder once a call.
+    static void moon (Raster& r, int x, int y, int destW, int destH, const Ink* ink)
+    {
+        constexpr int w = MoonRuns::w, h = MoonRuns::h, widest = 256;
+        const int firstI = std::max (0, -x), endI = std::min (destW, r.w - x);
+        if (firstI >= endI || destW > widest || destW <= 0) return;
+        uint8_t source[widest];
+        for (int i = firstI, column = firstI * w / destW, rest = firstI * w % destW; i < endI; ++i)
+        {
+            source[i] = (uint8_t) column;
+            for (rest += w; rest >= destW; rest -= destW) ++column;
+        }
+        for (int j = std::max (0, -y); j < destH && y + j < r.h; ++j)
+        {
+            const int sy = j * h / destH;
+            const uint8_t* row = moonPixels.at[sy];
+            Ink* out = r.px + (y + j) * r.w + x;
+            for (int k = 0; k < moonRuns.count[sy]; ++k)
+            {
+                // The columns whose source lies in the run: floor (i * w / destW) from `from` to `to`.
+                const int a = std::max (firstI, (moonRuns.from[sy][k] * destW + w - 1) / w);
+                const int b = std::min (endI - 1, ((moonRuns.to[sy][k] + 1) * destW + w - 1) / w - 1);
+                int i = a;
+                if (destW == w)
+                {
+                    for (; i + 3 <= b; i += 4)
+                    {
+                        const Ink p0 = ink[row[i]], p1 = ink[row[i + 1]], p2 = ink[row[i + 2]], p3 = ink[row[i + 3]];
+                        out[i] = p0, out[i + 1] = p1, out[i + 2] = p2, out[i + 3] = p3;
+                    }
+                    for (; i <= b; ++i) out[i] = ink[row[i]];
+                }
+                else
+                {
+                    for (; i + 3 <= b; i += 4)
+                    {
+                        const Ink p0 = ink[row[source[i]]], p1 = ink[row[source[i + 1]]], p2 = ink[row[source[i + 2]]], p3 = ink[row[source[i + 3]]];
+                        out[i] = p0, out[i + 1] = p1, out[i + 2] = p2, out[i + 3] = p3;
+                    }
+                    for (; i <= b; ++i) out[i] = ink[row[source[i]]];
+                }
             }
         }
     }
@@ -62,12 +200,25 @@ class Screen
         r.box (5, 43, 310, 1, 0xff69536e);
     }
 
-    static void globe (Raster& r, int pulse)
+    void globe (Raster& r, uint64_t now, int pulse, const Ink* ink) const
     {
-        for (int x = 6; x < 159; x += 15) r.box (x, 5, 1, 110, 0xff352c56);
-        for (int y = 7; y < 115; y += 15) r.box (5, y, 154, 1, 0xff352c56);
+        shock.under (r, now);
+        // The vertical lines a row at a time (as box() would draw them, a pixel wide over rows 5-114).
+        for (int y = 5; y < 115; ++y)
+            for (Ink* p = r.px + y * r.w, *end = p + 159, *x = p + 6; x < end; x += 15) *x = inks::globeGrid;
+        for (int y = 7; y < 115; y += 15) r.box (5, y, 154, 1, inks::globeGrid);
+        shock.behind (r, now);
         // A struck shell widens and flattens, then lands back on its native pixels.
-        sprite (r, art::moon, 156, 0, 156, 118, 5 - pulse, 2 + pulse, 156 + 2 * pulse, 118 - 2 * pulse);
+        moon (r, 5 - pulse, 2 + pulse, 156 + 2 * pulse, 118 - 2 * pulse, ink);
+        shock.front (r, now);
+    }
+
+    // How long a hit's shock rings: longer for a longer kick (the Decay it was struck with), within 240-560 ms
+    // (about 310 ms at the default Decay).
+    float shockMs() const
+    {
+        const float decayMs = 1000.0f * decaySeconds (withCv (ParamId::decay, CvDest::decay));
+        return std::clamp (200.0f + 0.3f * decayMs, 240.0f, 560.0f);
     }
 
     // The engine's own CV sum (params.h), so the graphs follow the same destination arithmetic as the sound.
@@ -188,9 +339,11 @@ public:
             ids[k] = p.kind == Kind::button ? MELODEE_SCREEN_NO_CONTROL : p.id;
         }
     }
-    bool animating() const { return pulsing; }
+    bool animating() const { return moving; }
 
-    bool paint (const melodee_screen_frame_t& c, const std::atomic<float>* params, uint32_t hits)
+    // `hits` counts the engine's hits; `level` is the newest one's strength (1 a full hit, up to 2 with Accent; 0 a
+    // hit that makes no sound, which draws nothing).
+    bool paint (const melodee_screen_frame_t& c, const std::atomic<float>* params, uint32_t hits, float level = 1.0f)
     {
         const bool whole = c.redraw_all != 0 || lastPage < 0;
         const bool moved = lastPage != page;
@@ -214,15 +367,33 @@ public:
             lastKnobsLive[k] = liveNow;
         }
         // A hit while the page was away is counted, not shown: a whole paint opens without a pulse.
-        if (seenHits != hits) { seenHits = hits; if (! whole) hitAt = c.time_ms, pulsing = true; }
+        if (seenHits != hits)
+        {
+            seenHits = hits;
+            // Within 0-2 (Accent's most); not a number, a full hit.
+            level = level >= 0.0f ? std::min (level, 2.0f) : (level < 0.0f ? 0.0f : 1.0f);
+            if (! whole && level > 0.0f)
+            {
+                hitAt = c.time_ms;
+                kick = std::clamp ((int) std::lround (6.0f * level), 2, 7);
+                soft = level < 0.45f;
+                shock.strike (c.time_ms, level, shockMs(), hits);
+            }
+        }
+        // The squash steps back a pixel every 30 ms; the flash lasts 110 ms (hot for 50, unless soft); the shock as
+        // long as shockMs().
         const uint64_t age = c.time_ms - hitAt;
-        pulsing = pulsing && age < 180;
-        const int pulse = pulsing ? 6 - (int) (age / 30) : 0;
+        const bool struck = kick > 0 && c.time_ms >= hitAt;
+        const int pulse = struck && age < 30u * (uint64_t) kick ? kick - (int) (age / 30) : 0;
+        const Ink* ink = struck && age < 50 && ! soft ? hot.data() : (struck && age < 110 ? warm.data() : art::palette);
+        const bool live = pulse != 0 || ink != art::palette || shock.live (c.time_ms);
         bool drew = false;
         if (whole || moved)
             drew |= picture.region<320,45> (c.pixels, c.stride, whole, 0, 0, [&](Raster& r) { header (r); });
-        if (whole || lastPulse != pulse)
-            drew |= picture.region<164,122> (c.pixels, c.stride, whole, 0, 45, [&](Raster& r) { globe (r, pulse); });
+        // Every frame while it moves, and once more as it comes to rest.
+        if (whole || live || moving)
+            drew |= picture.region<164,122> (c.pixels, c.stride, whole, 0, 45, [&](Raster& r) { globe (r, c.time_ms, pulse, ink); });
+        moving = live;
         if (whole || pitchChanged)
             drew |= picture.region<156,61> (c.pixels, c.stride, whole, 164, 45, [&](Raster& r) { envelope (r, true); });
         if (whole || ampChanged)
@@ -230,7 +401,6 @@ public:
         const bool shiftNow = c.shift != 0;
         if (whole || moved || cardsChanged || knobsMoved || shiftNow != lastShift)
             drew |= picture.region<320,51> (c.pixels, c.stride, whole, 0, 167, [&](Raster& r) { footer (r, c); });
-        lastPulse = pulse;
         lastPage = page;
         lastShift = shiftNow;
         return drew;
