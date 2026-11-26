@@ -435,6 +435,9 @@ public:
     }
 
     uint32_t hitCount() const { return hits; }
+    // The newest hit's strength (velocity through Dynamics, times Accent: 1 a full hit, up to 2), for the screen's
+    // shockwave; the gate's charge is left out, so a full hit is a full wave at any Gate Time.
+    float lastHitStrength() const { return hitStrength; }
 
 private:
     uint32_t hits = 0; // screen notification; counts only kicks that pass the note filter, one a frame
@@ -515,14 +518,20 @@ private:
         lfo[i].anchor (now, cycles - std::floor (cycles));
     }
 
-    // A hit's level: velocity as far as Dynamics lets it, the Accent CV, and how much a gate `ms` long charged the
-    // envelope (a short gate puts less energy into it).
-    float levelOf (float velocity, float ms) const
+    // A hit's strength: velocity as far as Dynamics lets it, and the Accent CV (1 a full hit, up to 2).
+    float strengthOf (float velocity) const
     {
         const float dynamics = knob[ParamId::dynamics];
         const float accent = clampf (1.0f + cv[CvDest::accent], 0.0f, 2.0f);
+        return (1.0f - dynamics * (1.0f - velocity)) * accent;
+    }
+
+    // A hit's level: its strength, and how much a gate `ms` long charged the envelope (a short gate puts less energy
+    // into it).
+    float levelOf (float velocity, float ms) const
+    {
         const float charge = 0.6f + 0.4f * (1.0f - std::exp (-ms / 2.0f));
-        return (1.0f - dynamics * (1.0f - velocity)) * accent * charge;
+        return strengthOf (velocity) * charge;
     }
 
     // A hit, from a note (its key) or Play (-1). Two on one frame (pads struck together, a pad over the sequence: a
@@ -557,6 +566,7 @@ private:
         metal2Bits = MetalNoise::selection (metal2, (int) clampf (knob[ParamId::noise2Mask], 1.0f, 16.0f));
         gateLeft = std::max<int32_t> (1, (int32_t) std::lrint (ms * 0.001 * rate));
         hitLevel = levelOf (velocity, ms);
+        hitStrength = strengthOf (velocity);
         keyOct = keyOctaves;
 
         phase = 0.0f;
@@ -664,6 +674,7 @@ private:
 
     // The hit.
     float hitTune = 0.0f, vcaFall = 0.0f, hitPulse = 0.0f, hitNoise = 0.0f, hitAttack = 0.0f, hitLevel = 0.0f, keyOct = 0.0f;
+    float hitStrength = 0.0f; // the screen's only
     int metal1 = 1, metal2 = 0;
     uint32_t metal2Bits = 0;
     int hitKey = -1; // the key that played the hit (-1: Play), for a choke

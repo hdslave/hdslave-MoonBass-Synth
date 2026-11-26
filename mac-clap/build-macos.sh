@@ -17,3 +17,4 @@ codesign --force --deep --sign - "$BUNDLE"
 
 echo "Running CLAP host smoke tests..."
 "$BUILD_DIR/host_test" "$BUNDLE"
+"$BUILD_DIR/tile_test"

@@ -31,6 +31,9 @@ if(MSVC)
     target_compile_options(${SLUG}_inner PRIVATE /O2 /EHsc /W2 /FI"${DESKTOP_DIR}/win32/compat/msvc_compat.h" /wd4244 /wd4267 /wd4305 /wd4996)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(${SLUG}_inner PRIVATE -Wno-c++11-narrowing -Wno-deprecated-declarations -Wno-unused-command-line-argument)
+    else()
+        # The page's moon tables (screen.h) are worked out from the art when compiling: more steps than MSVC's default.
+        target_compile_options(${SLUG}_inner PRIVATE /constexpr:steps10000000)
     endif()
 else()
     target_compile_options(${SLUG}_inner PRIVATE -O3 -ffp-contract=fast -fno-math-errno -fno-trapping-math -fvisibility=hidden)
@@ -98,6 +101,13 @@ elseif(WIN32)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/clap"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/clap"
     )
+endif()
+
+# The Orbital Impact tile's hit animation, through the inner plug-in's own sources (clang and GCC toolchains).
+if(NOT MSVC)
+    add_executable(tile_test "${CMAKE_SOURCE_DIR}/tests/tile_test.cpp")
+    target_include_directories(tile_test PRIVATE "${CLAP_INCLUDE_DIR}" "${CMAKE_SOURCE_DIR}/src" "${DESKTOP_DIR}")
+    target_compile_options(tile_test PRIVATE -O2 -ffp-contract=fast -fno-math-errno -fno-trapping-math)
 endif()
 
 add_executable(host_test "${CMAKE_SOURCE_DIR}/tests/host_test.cpp")

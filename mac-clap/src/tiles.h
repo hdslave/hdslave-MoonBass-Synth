@@ -113,7 +113,8 @@ struct TilesAccess
             p.screen.lastPage = -1;
             melodee_screen_frame_t c = *frame;
             c.redraw_all = 1;
-            const bool drew = p.screen.paint (c, p.values, p.hits.load (std::memory_order_acquire));
+            const uint32_t hits = p.hits.load (std::memory_order_acquire);
+            const bool drew = p.screen.paint (c, p.values, hits, p.hitStrength.load (std::memory_order_relaxed));
             if (knobs_out)
                 p.screen.knobs (knobs_out);
             p.screen.page = savedPage;

@@ -7,7 +7,15 @@ Separate desktop CLAP build of **hdslave MoonBass** for **FL Studio** (2024+) an
 - **Multi-Screen MPC Dashboard:** displays all of hdslave MoonBass's native MPC screens simultaneously on one resizable Retina/HiDPI panel (with the hardware `K1`–`K3` footer panels removed) and direct mouse, trackpad, and touch control over every parameter, plot, sequencer, and pad.
 - **Standalone from the MPC Sample build:** this directory is completely separate from the MPC Sample build in the repository root (`../src`, `../build.sh`). GitHub releases remain MPC Sample-only for now while the desktop builds are being finalized.
 
-Version 0.1.6 starts new instances and the Default preset with **Split Mode** at **C1-F3**.
+Version 0.1.7 brings the MPC build's hit shockwave to the Orbital Impact tile:
+- a flash of the moon;
+- a pressure wave that lights the grid;
+- a blast in the plane of the moon's ring;
+- sparks.
+
+Its size follows velocity and Accent, and its length the Decay. Before 0.1.7 that tile never moved on a hit at all, not even the flattening: the panel paints its tiles whole every frame, and the page took every whole paint for a reopening. The tile now shows a hit unless the panel was shut since (no paint for a quarter of a second). `build-macos.sh` runs `tile_test`, which checks this through the inner plug-in.
+
+Since 0.1.6, new instances and the Default preset start with **Split Mode** at **C1-F3**.
 
 ## Build & Install (macOS)
 
