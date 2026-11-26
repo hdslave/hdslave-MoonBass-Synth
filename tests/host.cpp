@@ -1,9 +1,9 @@
 // Loads MoonBass.clap as a host does and checks it: description and ports, every parameter and its page, state,
 // presets, hits landing on their frame, the same output whatever the block size, the sound's parts (Pitch, Tune,
-// Decay, Compression, Harmonics, the attack and both metal noises, EQ), what a hit takes as it is at the hit, Split
-// Mode and Pitch Mode, Dynamics, two hits on one frame, the LFOs (free, retriggered, one shot, in step with the song),
-// the CV inputs, the MIDI controller map, Play, and bounded output at random and extreme settings. Writes demo renders
-// as WAV files.
+// Decay, Compression, Harmonics, the attack and both metal noises, EQ), what a hit takes as it is at the hit, Key
+// Range and Pitch Mode, Dynamics, two hits on one frame, the LFOs (free, retriggered, one shot, in step with the
+// song), the CV inputs, the MIDI controller map, Play, and bounded output at random and extreme settings. Writes demo
+// renders as WAV files.
 //   host MoonBass.clap OUT_FOLDER
 #include "wav.h"
 #include "../src/melodee_screen.h"
@@ -425,7 +425,8 @@ void testParameters()
     CHECK (a.text ("Noise 2 Mask", 1) == "M01" && a.text ("Noise 2 Mask", 16) == "M16");
     CHECK (a.text ("CV 1 Amt", -128) == "-128" && a.text ("CV 1 Amt", 127) == "+127" && a.text ("CV 4 In", 5.0) == "5.00 V");
     CHECK (a.text ("LFO 2 Wave", 15) == "Pulse 12" && a.text ("LFO 1 Clock", 4) == "1/4" && a.text ("CV 2 Dest", 16) == "Accent");
-    CHECK (a.value ("Split Mode") == 6.0 && a.text ("Split Mode", 6) == "C1-F3" && a.text ("Pitch Mode", 0) == "Linear");
+    CHECK (a.value ("Key Range") == 6.0 && a.text ("Key Range", 6) == "C1-F3" && a.text ("Key Range", 0) == "All Keys"
+           && a.text ("Pitch Mode", 0) == "Linear");
     CHECK (a.valueOf ("Metal Noise 1", "Noise") == 1.0 && a.valueOf ("Noise 2 Mask", "M07") == 7.0 && a.valueOf ("LFO 1 Mode", "One Shot") == 2.0);
     CHECK_NEAR (a.valueOf ("Pitch", "175 Hz"), 1.0, 1e-5);
     CHECK_NEAR (a.valueOf ("Decay", "2 s"), 1.0, 1e-5);
@@ -444,7 +445,7 @@ void testParameters()
 
 void testState()
 {
-    const Settings settings { { "Pitch", 0.3 }, { "Metal Noise 1", 222 }, { "LFO 2 Mode", 2 }, { "CV 3 Amt", -77 }, { "CV 3 In", 2.5 }, { "Split Mode", 3 } };
+    const Settings settings { { "Pitch", 0.3 }, { "Metal Noise 1", 222 }, { "LFO 2 Mode", 2 }, { "CV 3 Amt", -77 }, { "CV 3 In", 2.5 }, { "Key Range", 3 } };
     std::vector<uint8_t> saved;
     {
         Instance a;
@@ -488,7 +489,7 @@ void testState()
     CHECK (load (c, other));
     CHECK_NEAR (c.value ("Harmonics"), 0.9, 1e-6);
     CHECK (c.value ("Pitch") == 0.5623f);
-    CHECK (c.value ("Split Mode") == 0.0); // omitted in a v1 state
+    CHECK (c.value ("Key Range") == 0.0); // omitted in a v1 state
     std::vector<uint8_t> wrong = { 'A', 'N', 'V', 'L', 1, 0, 0, 0, 0, 0, 0, 0 };
     CHECK (! load (c, wrong));
 }
@@ -504,22 +505,22 @@ const std::vector<Demo>& demos()
 {
     static const std::vector<Demo> list {
         { "default", {}, {} },
-        { "gut-punch", { { "Split Mode", 0 }, { "Tune", 0.7 }, { "Pitch", 0.576 }, { "Decay", 0.62 }, { "Harmonics", 0.2 }, { "Pulse", 0.7 }, { "Noise", 0.25 },
+        { "gut-punch", { { "Key Range", 0 }, { "Tune", 0.7 }, { "Pitch", 0.576 }, { "Decay", 0.62 }, { "Harmonics", 0.2 }, { "Pulse", 0.7 }, { "Noise", 0.25 },
                          { "Attack", 0.7 }, { "EQ", 0.25 }, { "Gate Time", 0.25 }, { "Compression", 0.1 } }, {} },
-        { "soft-boom", { { "Split Mode", 0 }, { "Tune", 0.15 }, { "Pitch", 0.5255 }, { "Decay", 0.85 }, { "Harmonics", 0.0 }, { "Pulse", 0.2 }, { "Noise", 0.05 },
+        { "soft-boom", { { "Key Range", 0 }, { "Tune", 0.15 }, { "Pitch", 0.5255 }, { "Decay", 0.85 }, { "Harmonics", 0.0 }, { "Pulse", 0.2 }, { "Noise", 0.05 },
                          { "Attack", 0.3 }, { "EQ", 0.8 }, { "Gate Time", 0.2 } }, {} },
-        { "sub-drop", { { "Split Mode", 0 }, { "Tune", 0.4 }, { "Pitch", 0.3838 }, { "Decay", 0.95 }, { "Harmonics", 0.05 }, { "Pulse", 0.3 }, { "Noise", 0.0 },
+        { "sub-drop", { { "Key Range", 0 }, { "Tune", 0.4 }, { "Pitch", 0.3838 }, { "Decay", 0.95 }, { "Harmonics", 0.05 }, { "Pulse", 0.3 }, { "Noise", 0.0 },
                         { "Attack", 0.2 }, { "EQ", 0.6 } }, {} },
-        { "clap-kick", { { "Split Mode", 0 }, { "Tune", 0.45 }, { "Decay", 0.5 }, { "Pulse", 0.5 }, { "Noise", 0.8 }, { "Attack", 0.85 }, { "EQ", 0.05 }, { "Gate Time", 0.95 } }, {} },
-        { "metal-kick", { { "Split Mode", 0 }, { "Tune", 0.6 }, { "Decay", 0.55 }, { "Harmonics", 0.4 }, { "Noise", 0.7 }, { "Attack", 0.7 }, { "EQ", 0.1 }, { "Gate Time", 0.6 },
+        { "clap-kick", { { "Key Range", 0 }, { "Tune", 0.45 }, { "Decay", 0.5 }, { "Pulse", 0.5 }, { "Noise", 0.8 }, { "Attack", 0.85 }, { "EQ", 0.05 }, { "Gate Time", 0.95 } }, {} },
+        { "metal-kick", { { "Key Range", 0 }, { "Tune", 0.6 }, { "Decay", 0.55 }, { "Harmonics", 0.4 }, { "Noise", 0.7 }, { "Attack", 0.7 }, { "EQ", 0.1 }, { "Gate Time", 0.6 },
                           { "Metal Noise 1", 337 }, { "Metal Noise 2", 77 }, { "Noise 2 Mask", 12 } }, {} },
-        { "wobble-tail", { { "Split Mode", 0 }, { "Tune", 0.35 }, { "Pitch", 0.5 }, { "Decay", 0.9 }, { "LFO 1 Wave", 2 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } }, {} },
-        { "zap", { { "Split Mode", 0 }, { "Tune", 0.3 }, { "Decay", 0.55 }, { "Harmonics", 0.3 }, { "LFO 1 Wave", 1 }, { "LFO 1 Speed", 0.75 }, { "LFO 1 Int", 0.6 }, { "LFO 1 Mode", 2 } }, {} },
-        { "bass-line", { { "Split Mode", 6 }, { "Pitch Mode", 1 }, { "Pitch", 0.4139 }, { "Tune", 0.1 }, { "Decay", 0.8 }, { "Harmonics", 0.5 },
+        { "wobble-tail", { { "Key Range", 0 }, { "Tune", 0.35 }, { "Pitch", 0.5 }, { "Decay", 0.9 }, { "LFO 1 Wave", 2 }, { "LFO 1 Int", 0.25 }, { "LFO 1 Mode", 0 }, { "LFO 1 Clock", 8 } }, {} },
+        { "zap", { { "Key Range", 0 }, { "Tune", 0.3 }, { "Decay", 0.55 }, { "Harmonics", 0.3 }, { "LFO 1 Wave", 1 }, { "LFO 1 Speed", 0.75 }, { "LFO 1 Int", 0.6 }, { "LFO 1 Mode", 2 } }, {} },
+        { "bass-line", { { "Key Range", 6 }, { "Pitch Mode", 1 }, { "Pitch", 0.4139 }, { "Tune", 0.1 }, { "Decay", 0.8 }, { "Harmonics", 0.5 },
                          { "Pulse", 0.15 }, { "Noise", 0.0 }, { "Attack", 0.2 }, { "EQ", 0.35 } },
           { { 0, 36 }, { 6000, 36, 0.6 }, { 12000, 48 }, { 18000, 43, 0.7 }, { 24000, 39 }, { 36000, 46, 0.8 }, { 42000, 36 }, { 48000, 51, 0.6 },
             { 54000, 48 }, { 60000, 41 }, { 72000, 36 }, { 84000, 43 }, { 90000, 55, 0.7 } } },
-        { "pad-tunings", { { "Split Mode", 2 }, { "Pitch Mode", 0 }, { "Pitch", 0.45 }, { "Tune", 0.55 }, { "Decay", 0.6 }, { "Pulse", 0.6 }, { "Attack", 0.6 } },
+        { "pad-tunings", { { "Key Range", 2 }, { "Pitch Mode", 0 }, { "Pitch", 0.45 }, { "Tune", 0.55 }, { "Decay", 0.6 }, { "Pulse", 0.6 }, { "Attack", 0.6 } },
           { { 0, 36 }, { 12000, 37 }, { 24000, 38 }, { 36000, 39 }, { 48000, 40 }, { 60000, 41 }, { 72000, 42 }, { 84000, 43 } } },
     };
     return list;
@@ -842,7 +843,7 @@ void testTakenAtTheHit()
 
 // --- Playing it -----------------------------------------------------------------------------------------------------
 
-void testSplitAndPitchMode()
+void testKeyRangeAndPitchMode()
 {
     const Settings base = clean ({ { "Pitch", 0.5623 } });
     auto with = [&] (Settings more, int key) { Settings s = base; s.insert (s.end(), more.begin(), more.end()); return kick (s, { { 0, key } }, 1.0); };
@@ -850,26 +851,26 @@ void testSplitAndPitchMode()
     const auto c1 = with ({}, 36);
     CHECK (peak (with ({}, 65), 0, 4800) > 0.0f);
     CHECK (peak (with ({}, 35), 0, 4800) == 0.0f && peak (with ({}, 66), 0, 4800) == 0.0f);
-    // Any Note: every key plays the kick as set.
-    CHECK (same (c1, with ({ { "Split Mode", 0 } }, 0)) && same (c1, with ({ { "Split Mode", 0 } }, 100)));
+    // All Keys: every key plays the kick as set.
+    CHECK (same (c1, with ({ { "Key Range", 0 } }, 0)) && same (c1, with ({ { "Key Range", 0 } }, 100)));
     // C1: only C1.
-    CHECK (same (c1, with ({ { "Split Mode", 1 } }, 36)));
-    CHECK (peak (with ({ { "Split Mode", 1 } }, 37), 0, 48000) == 0.0f);
+    CHECK (same (c1, with ({ { "Key Range", 1 } }, 36)));
+    CHECK (peak (with ({ { "Key Range", 1 } }, 37), 0, 48000) == 0.0f);
     // C1-C2 in semitones: C2 an octave up; outside the range, nothing.
-    CHECK_NEAR (frequency (with ({ { "Split Mode", 2 } }, 48), 48000, 4800, 40000), 100.0, 0.3);
-    CHECK_NEAR (frequency (with ({ { "Split Mode", 2 } }, 43), 48000, 4800, 40000), 50.0 * std::pow (2.0, 7.0 / 12.0), 0.3);
-    CHECK (peak (with ({ { "Split Mode", 2 } }, 49), 0, 48000) == 0.0f && peak (with ({ { "Split Mode", 2 } }, 35), 0, 48000) == 0.0f);
+    CHECK_NEAR (frequency (with ({ { "Key Range", 2 } }, 48), 48000, 4800, 40000), 100.0, 0.3);
+    CHECK_NEAR (frequency (with ({ { "Key Range", 2 } }, 43), 48000, 4800, 40000), 50.0 * std::pow (2.0, 7.0 / 12.0), 0.3);
+    CHECK (peak (with ({ { "Key Range", 2 } }, 49), 0, 48000) == 0.0f && peak (with ({ { "Key Range", 2 } }, 35), 0, 48000) == 0.0f);
     // The other ranges: their lowest key plays Pitch, their ends play, past them nothing.
     for (auto [mode, low, high] : { std::tuple { 3, 48, 60 }, std::tuple { 4, 60, 72 }, std::tuple { 5, 36, 96 }, std::tuple { 6, 36, 65 } })
     {
-        CHECK (same (c1, with ({ { "Split Mode", mode } }, low)));
-        CHECK (peak (with ({ { "Split Mode", mode } }, high), 0, 4800) > 0.0f);
-        CHECK (peak (with ({ { "Split Mode", mode } }, high + 1), 0, 48000) == 0.0f);
-        CHECK (peak (with ({ { "Split Mode", mode } }, low - 1), 0, 48000) == 0.0f);
+        CHECK (same (c1, with ({ { "Key Range", mode } }, low)));
+        CHECK (peak (with ({ { "Key Range", mode } }, high), 0, 4800) > 0.0f);
+        CHECK (peak (with ({ { "Key Range", mode } }, high + 1), 0, 48000) == 0.0f);
+        CHECK (peak (with ({ { "Key Range", mode } }, low - 1), 0, 48000) == 0.0f);
     }
     // Linear: equal steps in Hz, a semitone's at the bottom.
-    CHECK_NEAR (frequency (with ({ { "Split Mode", 2 }, { "Pitch Mode", 0 } }, 48), 48000, 4800, 40000), 50.0 * (1.0 + 12.0 * (std::pow (2.0, 1.0 / 12.0) - 1.0)), 0.3);
-    CHECK_NEAR (frequency (with ({ { "Split Mode", 2 }, { "Pitch Mode", 0 } }, 37), 48000, 4800, 40000), 50.0 * std::pow (2.0, 1.0 / 12.0), 0.2);
+    CHECK_NEAR (frequency (with ({ { "Key Range", 2 }, { "Pitch Mode", 0 } }, 48), 48000, 4800, 40000), 50.0 * (1.0 + 12.0 * (std::pow (2.0, 1.0 / 12.0) - 1.0)), 0.3);
+    CHECK_NEAR (frequency (with ({ { "Key Range", 2 }, { "Pitch Mode", 0 } }, 37), 48000, 4800, 40000), 50.0 * std::pow (2.0, 1.0 / 12.0), 0.2);
 }
 
 void testDynamicsAndPlay()
@@ -934,7 +935,7 @@ void testSameFrame()
                           { "LFO 2 Int", 0.2 }, { "LFO 2 Mode", 2 }, { "LFO 2 Dest", 1 }, { "CV 1 Dest", 16 }, { "CV 1 Amt", 60 },
                           { "CV 1 In", 2.5 } };
     Settings split = busy;
-    split.push_back ({ "Split Mode", 2 }); // C1-C2 in semitones: C2 an octave up
+    split.push_back ({ "Key Range", 2 }); // C1-C2 in semitones: C2 an octave up
     constexpr uint64_t f = 2560;
     for (const std::vector<Step>& before : { std::vector<Step> {}, std::vector<Step> { hit (0, 0.8) } })
     {
@@ -981,7 +982,7 @@ void testSameFrame()
 // A choke (Melodee's all sound off, a cut group) stops the hit its key played, on its frame; another key's does not.
 void testChoke()
 {
-    const Settings base = clean ({ { "Pitch", 1.0 }, { "Split Mode", 0 } });
+    const Settings base = clean ({ { "Pitch", 1.0 }, { "Key Range", 0 } });
     auto run = [&] (int playKey, int chokeKey, bool play = false) {
         Instance a;
         a.setup (base);
@@ -1208,7 +1209,7 @@ void testBounded()
             s.push_back ({ p.name, v });
         }
         if (trial < 2)
-            s.push_back ({ "Split Mode", 0 }); // so the hits play
+            s.push_back ({ "Key Range", 0 }); // so the hits play
         std::vector<Hit> hits;
         const int spacing = trial % 3 == 0 ? 211 : 9000;
         for (uint64_t f = 0; f < 48000; f += (uint64_t) spacing)
@@ -1351,7 +1352,7 @@ void testScreen()
     CHECK (draw() && memory == rest);
     const int resting = paints;
     CHECK (!draw() && paints == resting);
-    a.setup ({ { "Split Mode", 1 } }); // C1 only
+    a.setup ({ { "Key Range", 1 } }); // C1 only
     a.play ({ { 0, 37 } }, 0.01);
     draw();
     CHECK (region (0, 45, 164, 122) == globe);
@@ -1759,7 +1760,7 @@ int main (int argc, char** argv)
     testAttack();
     testMetalNoise();
     testTakenAtTheHit();
-    testSplitAndPitchMode();
+    testKeyRangeAndPitchMode();
     testDynamicsAndPlay();
     testSameFrame();
     testChoke();

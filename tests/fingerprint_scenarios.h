@@ -7,7 +7,7 @@ namespace
 // added, keep this list and add another for scenarios that use them, so these hashes still hold.
 const std::vector<std::string> order01 { "Tune", "Pitch", "Decay", "Harmonics", "Pulse", "Noise", "Attack", "EQ", "Volume", "Gate Time",
     "Compression", "Play", "Metal Noise 1", "Metal Noise 2", "Noise 2 Mask", "LFO 1 Wave", "LFO 1 Speed", "LFO 1 Int", "LFO 1 Dest",
-    "LFO 1 Mode", "LFO 1 Clock", "LFO 2 Wave", "LFO 2 Speed", "LFO 2 Int", "LFO 2 Dest", "LFO 2 Mode", "LFO 2 Clock", "Split Mode",
+    "LFO 1 Mode", "LFO 1 Clock", "LFO 2 Wave", "LFO 2 Speed", "LFO 2 Int", "LFO 2 Dest", "LFO 2 Mode", "LFO 2 Clock", "Key Range",
     "Pitch Mode", "Dynamics", "CV 1 Dest", "CV 1 Amt", "CV 1 In", "CV 2 Dest", "CV 2 Amt", "CV 2 In", "CV 3 Dest", "CV 3 Amt",
     "CV 3 In", "CV 4 Dest", "CV 4 Amt", "CV 4 In" };
 
@@ -71,7 +71,7 @@ std::vector<Scenario> scenarios()
         s.events.push_back (cc (62403, 101, 40));
         s.events.push_back (cc (70001, 115, 77));
         s.events.push_back ({ 81000, Event::param, "Decay", 0.4 });
-        s.events.push_back ({ 96005, Event::param, "Split Mode", 0 });
+        s.events.push_back ({ 96005, Event::param, "Key Range", 0 });
         s.events.push_back ({ 100007, Event::param, "EQ", 0.25 });
         s.events.push_back (note (110000, 50));
         s.events.push_back ({ 115201, Event::param, "LFO 1 Clock", 6 });
@@ -149,7 +149,7 @@ std::vector<Scenario> scenarios()
     Scenario midi;
     midi.name = "midi";
     midi.seconds = 4.0;
-    midi.values = { { "Split Mode", 5 } };
+    midi.values = { { "Key Range", 5 } };
     {
         const int numbers[] = { 100, 101, 102, 103, 104, 105, 106, 107, 113, 114, 115, 116, 117, 119, 120, 121, 122, 123, 124, 125 };
         uint64_t f = 0;

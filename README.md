@@ -21,8 +21,10 @@ One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its bu
 
 Version 0.1.7. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
 
-In 0.1.7, a hit sets off a shockwave around the moon on the Orbital Impact page (below). The sound is unchanged to
-the bit; MoonBass has still not been run on the MPC.
+In 0.1.7, a hit sets off a shockwave around the moon on the Orbital Impact page (below), and Split Mode is renamed
+Key Range, with its Any Note choice now All Keys. It is the same parameter in the same place with the same choices,
+so saved projects and presets load as before. The sound is unchanged to the bit; MoonBass has still not been run on
+the MPC.
 
 In 0.1.4, a page Play is taken with the block's first-frame events (never after the
 transport) and its age counts audio frames rather than wall-clock time, so a sleeping host still auditions it;
@@ -38,7 +40,7 @@ repository.
 
 ```
 note / Play ──► gate (Gate Time) ──► VCO phase starts at 0, the VCA opens and is held for the gate
-Pitch (+ key: Split Mode, Pitch Mode) + Tune × pitch envelope + LFO 1/2 ──► VCO: sine ──Harmonics──► cusped wave
+Pitch (+ key: Key Range, Pitch Mode) + Tune × pitch envelope + LFO 1/2 ──► VCO: sine ──Harmonics──► cusped wave
 gate ──► Pulse (its edge through a coupling high pass) ─┐
 gate × (Metal Noise 1 + Metal Noise 2) ──► Noise ───────┴──► Attack ─┐
 VCO ──► VCA (held for the gate, then Decay; Compression cuts the tail) ─┴──► EQ (one-pole low pass) ──► Volume ──► out (stereo)
@@ -78,7 +80,7 @@ MoonBass groups its 42 parameters into 14 pages. On page 4 the third slot shows 
 | 7 | LFO 1 | LFO 1 Dest | LFO 1 Mode | LFO 1 Clock |
 | 8 | LFO 2 | LFO 2 Wave | LFO 2 Speed | LFO 2 Int |
 | 9 | LFO 2 | LFO 2 Dest | LFO 2 Mode | LFO 2 Clock |
-| 10 | Play | Split Mode | Pitch Mode | Dynamics |
+| 10 | Play | Key Range | Pitch Mode | Dynamics |
 | 11 | CV 1 | CV 1 Dest | CV 1 Amt | CV 1 In |
 | 12 | CV 2 | CV 2 Dest | CV 2 Amt | CV 2 In |
 | 13 | CV 3 | CV 3 Dest | CV 3 Amt | CV 3 In |
@@ -116,7 +118,7 @@ gives units where the manuals give them.
 | LFO 1 Mode | LFO Sync (FrE/SYn) + LFO One Shot (2nd function) | — (always restarts on the gate) | Free: runs on; Retrigger: starts again at each hit (a second pitch envelope); One Shot: one cycle from each hit, then holds where the cycle ends |
 | LFO 1 Clock | LFO Speed "Mid": MIDI clock | — | Free (Speed) / 2/1 … 1/32 with triplets: a cycle a note value at the host's tempo. With Mode Free it keeps in step with the song's beats (a cycle starts on each multiple from the top) |
 | LFO 2 … | — | LFO 2 (red page): the same | as LFO 1 |
-| Split Mode | Split Mode: SM1 (C1), SM2 (C1-F3) | Split Mode: SM1 (C1), SM2-SM4 (C1-C2, C2-C3, C3-C4), SM5 (C1-C6) | Any Note (new: every key plays the kick as set) / C1 / C1-C2 / C2-C3 / C3-C4 / C1-C6 / C1-F3. Keys outside the range don't play; inside it, the pitch counts up from its lowest key |
+| Key Range | Split Mode: SM1 (C1), SM2 (C1-F3) | Split Mode: SM1 (C1), SM2-SM4 (C1-C2, C2-C3, C3-C4), SM5 (C1-C6) | All Keys (new: every key plays the kick as set) / C1 / C1-C2 / C2-C3 / C3-C4 / C1-C6 / C1-F3. Keys outside the range don't play; inside it, the pitch counts up from its lowest key |
 | Pitch Mode | Pitch Mode: Lin / SEM | — (not in exact semitones) | Linear: equal steps in Hz, a semitone's at the bottom / Semitones |
 | Dynamics | — (velocity up to Volume) | Trig Dynamics d01-d63 (for the Trig input) | 0 – 100 %: how far velocity sets the level; 0, every hit at full level |
 | CV n Dest | — | CV 1-4 Dest (orange) | Off, Tune, Pitch, Decay, Harmonics, Pulse, Noise, Attack, EQ, Compression, Metal Noise 1, Metal Noise 2, LFO 1 Rate, LFO 1 Int, LFO 2 Rate, LFO 2 Int, Accent |
@@ -132,19 +134,19 @@ and the LFOs** move while a kick sounds.
 
 ### Notes and velocity
 
-New instances and the Default preset start with Split Mode at C1-F3. A note plays the kick if Split Mode takes its key. A note off does nothing: Gate Time is the gate. The level is the
+New instances and the Default preset start with Key Range at C1-F3. A note plays the kick if its key is in the Key Range. A note off does nothing: Gate Time is the gate. The level is the
 velocity as far as Dynamics lets it, times the Accent CV, times the gate's charge (a short gate puts less into the
 envelope). A new hit restarts the VCO's phase and the envelopes over whatever still sounds, as one voice does.
 
 Two hits on one frame are one hit: the louder plays as if it had come alone, its key, pitch and level with it (equal,
 the later). Melodee gives all of a block's MIDI its first frame, so two pads struck together, a pad over the sequence
-or a 35 and 36 pair land on one frame; a ghost note there no longer takes the accent's level, or (with a Split Mode)
+or a 35 and 36 pair land on one frame; a ghost note there no longer takes the accent's level, or (with a Key Range other than All Keys)
 its pitch. A frame apart, both play.
 
 A choke stops the hit its key played, on its frame (a choke of any key, -1, stops whatever plays), and so does MIDI's
 All Sound Off (CC 120 at 0). Melodee sends both when it silences a track.
 
-- **Any Note** suits a drum track: every pad plays the kick as set.
+- **All Keys** suits a drum track: every pad plays the kick as set.
 - **C1-C2** with **Linear** is the ModBase 09's way: the eight pads of a Melodee drum track (notes 36-43) play eight
   tunings of one kick.
 - **C1-F3** with **Semitones** and a long Decay is the MBase 11's way to play bass lines.
@@ -197,8 +199,8 @@ discovery does). A preset sets every parameter; Default puts everything back (th
 | Metal Kick | Both metal noise generators (337 and 77, mask M12) in a long gate |
 | Wobble Tail | A long tail with LFO 1 on Pitch, a sine at 1/16 in step with the song |
 | Zap | LFO 1 as a one-shot Saw Down on Pitch: the tail drops away |
-| Bass Line | Split C1-F3 in Semitones from C1 (32.7 Hz), Harmonics up, a long decay: play it from the keys |
-| Pad Tunings | Split C1-C2, Linear: each pad of a drum track a different tuning |
+| Bass Line | Key Range C1-F3 in Semitones from C1 (32.7 Hz), Harmonics up, a long decay: play it from the keys |
+| Pad Tunings | Key Range C1-C2, Linear: each pad of a drum track a different tuning |
 
 They are the patches the demo renders play: the tests load each preset and check it gives the same values and the
 same samples as the demo's list.
@@ -298,7 +300,7 @@ The tests load the plug-in through the CLAP API and check (about 474,000 checks)
   - the metal noises' rules (off, silent masks, numbers alike above the mask, M01's 10 kHz, M09-M16 each its own and
     slower);
 - which parameters a hit takes at its start and which move while it sounds;
-- each Split Mode's keys and Pitch Mode's steps;
+- each Key Range's keys and Pitch Mode's steps;
 - Dynamics, MIDI notes and Play;
 - two hits on one frame, either order (the louder plays as if alone, to the bit, at block sizes 1-4096), and a frame
   apart (both play);

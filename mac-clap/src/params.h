@@ -101,9 +101,10 @@ inline const char* const lfoModeChoices[] = { "Free", "Retrigger", "One Shot" };
 inline const char* const lfoClockChoices[] = { "Free", "2/1", "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
 constexpr double lfoClockBeats[] = { 0.0, 8.0, 4.0, 2.0, 1.0, 2.0 / 3.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
 static_assert (sizeof (lfoClockBeats) / sizeof (lfoClockBeats[0]) == sizeof (lfoClockChoices) / sizeof (lfoClockChoices[0]), "a length a choice");
-// Split Mode: which keys play and from which the pitch counts. Any Note (new: any pad plays the kick as set), then
-// the ModBase 09's SM1-SM5 and the MBase 11's SM2.
-inline const char* const splitChoices[] = { "Any Note", "C1", "C1-C2", "C2-C3", "C3-C4", "C1-C6", "C1-F3" };
+// Key Range (the hardware's Split Mode): which keys play and from which the pitch counts. All Keys (new: any pad
+// plays the kick as set), then the ModBase 09's SM1-SM5 and the MBase 11's SM2. Renamed in 0.1.7 (was Split Mode,
+// and All Keys was Any Note): the id, the order and the values are as before, so saved projects load unchanged.
+inline const char* const splitChoices[] = { "All Keys", "C1", "C1-C2", "C2-C3", "C3-C4", "C1-C6", "C1-F3" };
 constexpr int splitAnyNote = 0, splitC1F3 = 6;
 struct KeyRange { int16_t low, high; };
 inline constexpr KeyRange splitRanges[] = { { 0, 127 }, { 36, 36 }, { 36, 48 }, { 48, 60 }, { 60, 72 }, { 36, 96 }, { 36, 65 } };
@@ -158,7 +159,7 @@ inline constexpr Param paramTable[] = {
     CHOICE (lfo2Mode, "LFO 2 Mode", "LFO 2", lfoModeChoices, 1.0f),
     CHOICE (lfo2Clock, "LFO 2 Clock", "LFO 2", lfoClockChoices, 0.0f),
     // 10: how notes play it
-    CHOICE (splitMode, "Split Mode", "Play", splitChoices, splitC1F3),
+    CHOICE (splitMode, "Key Range", "Play", splitChoices, splitC1F3),
     CHOICE (pitchMode, "Pitch Mode", "Play", pitchModeChoices, 1.0f),
     CONT (dynamics, "Dynamics", "Play", 0.0f, 1.0f, 1.0f, percent),
     // 11-14: the CV inputs, each with its destination and amount

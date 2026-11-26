@@ -225,7 +225,7 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
         }
         case CLAP_EVENT_NOTE_ON:
         {
-            // A note plays the kick if Split Mode takes its key (a note off does nothing: Gate Time is the gate).
+            // A note plays the kick if Key Range takes its key (a note off does nothing: Gate Time is the gate).
             const auto* n = reinterpret_cast<const clap_event_note*> (e);
             if (n->velocity > 0.0 && n->key >= 0 && n->key < 128)
                 p.engine.note (n->key, (float) n->velocity);
@@ -354,7 +354,7 @@ bool stateLoad (const clap_plugin* plugin, const clap_istream* stream)
     float loaded[paramCount];
     for (uint32_t i = 0; i < paramCount; ++i)
         loaded[i] = paramTable[i].def;
-    // Sparse v1 states used Any Note when they omitted Split Mode.
+    // Sparse v1 states used All Keys when they omitted Key Range.
     loaded[ParamId::splitMode] = splitAnyNote;
     for (uint32_t i = 0; i < header[1]; ++i)
     {

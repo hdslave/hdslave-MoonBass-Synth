@@ -26,7 +26,7 @@ namespace presetValues
 {
 using namespace ParamId;
 // Choices by their place in the list: LFO Wave Saw Down 1, Sine 2; LFO Mode Free 0, One Shot 2; LFO Clock 1/16 is
-// 8; Split Mode C1-C2 is 2, C1-F3 is 6; Pitch Mode Linear 0, Semitones 1. Knobs as 0..1 (params.h has the curves:
+// 8; Key Range C1-C2 is 2, C1-F3 is 6; Pitch Mode Linear 0, Semitones 1. Knobs as 0..1 (params.h has the curves:
 // Pitch 0.576 is 52 Hz, 0.414 is 32.7 Hz, the note C1).
 constexpr PresetValue gutPunch[] = {
     { splitMode, splitAnyNote },

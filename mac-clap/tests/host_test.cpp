@@ -293,7 +293,7 @@ bool testOnePlugin (const std::string& clapPath, const std::string& snapDir)
         if (params->get_info (plug, i, &info))
         {
             modules.insert (info.module);
-            if (std::strcmp (info.name, "Split Mode") == 0)
+            if (std::strcmp (info.name, "Key Range") == 0)
             {
                 double current = -1.0;
                 char label[16] = {};
@@ -304,7 +304,7 @@ bool testOnePlugin (const std::string& clapPath, const std::string& snapDir)
     }
     if (!expectedParam)
     {
-        std::fprintf (stderr, "FAIL: missing or incorrect Split Mode parameter\n");
+        std::fprintf (stderr, "FAIL: missing or incorrect Key Range parameter\n");
         return false;
     }
 

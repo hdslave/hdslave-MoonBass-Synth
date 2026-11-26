@@ -16,7 +16,7 @@ struct TilesAccess
         {  0,  1,  2 }, // Tile 1: Pages 1..3 (Tune/Pitch/Decay, Harmonics/Pulse/Noise, Attack/EQ/Volume)
         {  3,  4,  5 }, // Tile 2: Pages 4..6 (Gate/Compress/Play, Metal 1/2/Mask, LFO 1 Wave/Speed/Int)
         {  6,  7,  8 }, // Tile 3: Pages 7..9 (LFO 1 Dest/Mode/Clock, LFO 2 Wave/Speed/Int, LFO 2 Dest/Mode/Clock)
-        {  9, 10, 11 }, // Tile 4: Pages 10..12 (Split/Pitch/Dynamics, CV 1, CV 2)
+        {  9, 10, 11 }, // Tile 4: Pages 10..12 (Key Range/Pitch/Dynamics, CV 1, CV 2)
         { 12, 13, -1 }  // Tile 5: Pages 13..14 (CV 3, CV 4) + Sub-Bass Trigger Pad
     };
 

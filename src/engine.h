@@ -1,7 +1,7 @@
 // MoonBass's sound: one analog-style kick drum voice, run at the host's rate.
 //
 //   note / Play --> trigger: Gate Time opens the gate; the VCO's phase starts at 0
-//   Pitch (+ key, Split and Pitch Mode) + Tune x pitch envelope + LFOs --> VCO: sine, bent toward a cusped wave (Harmonics)
+//   Pitch (+ key, Key Range and Pitch Mode) + Tune x pitch envelope + LFOs --> VCO: sine, bent toward a cusped wave (Harmonics)
 //   gate --> Pulse (the gate's edge through a coupling high pass) + Noise (Metal Noise 1 + 2, during the gate) --> Attack
 //   VCO --> VCA (held for the gate, then Decay; Compression cuts the tail) + attack --> EQ (one-pole low pass) --> Volume --> out
 //
@@ -370,7 +370,7 @@ public:
             silence();
     }
 
-    // A MIDI note: plays if Split Mode takes its key, the pitch counted from the range's lowest key.
+    // A MIDI note: plays if Key Range takes its key, the pitch counted from the range's lowest key.
     void note (int key, float velocity, int noteId = -1)
     {
         const int split = std::min (std::max ((int) knob[ParamId::splitMode], 0), 6);

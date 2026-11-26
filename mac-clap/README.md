@@ -15,7 +15,7 @@ Version 0.1.7 brings the MPC build's hit shockwave to the Orbital Impact tile:
 
 Its size follows velocity and Accent, and its length the Decay. Before 0.1.7 that tile never moved on a hit at all, not even the flattening: the panel paints its tiles whole every frame, and the page took every whole paint for a reopening. The tile now shows a hit unless the panel was shut since (no paint for a quarter of a second). `build-macos.sh` runs `tile_test`, which checks this through the inner plug-in.
 
-Since 0.1.6, new instances and the Default preset start with **Split Mode** at **C1-F3**.
+Since 0.1.6, new instances and the Default preset start with **Key Range** at **C1-F3**. Key Range was called Split Mode before 0.1.7, and its **All Keys** choice Any Note; saved projects load unchanged.
 
 ## Build & Install (macOS)
 
