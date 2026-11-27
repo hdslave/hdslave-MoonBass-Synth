@@ -2,7 +2,7 @@
 
 Separate desktop CLAP build of **hdslave MoonBass** for **FL Studio** (2024+) and any other CLAP host on macOS (Apple Silicon / Intel) and Windows (x64).
 
-![MoonBass kick envelope and output during playback](assets/desktop-preview.gif)
+![MoonBass desktop panel: its six screens, then Orbital Impact zoomed, kicks setting off the shockwave](assets/desktop-preview.gif)
 
 - **Multi-Screen MPC Dashboard:** displays all of hdslave MoonBass's native MPC screens simultaneously on one resizable Retina/HiDPI panel (with the hardware `K1`–`K3` footer panels removed) and direct mouse, trackpad, and touch control over every parameter, plot, sequencer, and pad.
 - **Standalone from the MPC Sample build:** this directory is completely separate from the MPC Sample build in the repository root (`../src`, `../build.sh`). GitHub releases remain MPC Sample-only for now while the desktop builds are being finalized.
