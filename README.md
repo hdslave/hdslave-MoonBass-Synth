@@ -19,7 +19,17 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
-Version 0.1.7. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+Version 0.1.8. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+
+In 0.1.8, an LFO in step with the song (Clock a note value, Mode Free) takes the song's place a little off its line
+as no jump. hdslaveOS works the place out from its ticks, so a swung tick, a tick on a block's edge or MTC's trim puts
+it up to 0.0021 of a quarter off from block to block, and a plug-in two tracks play is run twice a block (its next
+block's first call told a block back). A place told behind where the LFO got to, by less than a 64th note, holds it
+there until the song is past it again; one told ahead moves it on. Up to 0.1.7 any move over 0.001 of a beat put the
+LFO where the place was told, back or forth, so a Square or Pulse edge could come twice, a millisecond or two apart:
+at 127 BPM with the place up to 0.002 of a quarter off, 16 of 255 edges of a square at 1/32 did, and with swing 60, 33.
+A place moved back a 64th note or more is still a jump. The fingerprints are unchanged (the song's place in them is
+straight); MoonBass has still not been run on the MPC.
 
 In 0.1.7, a hit sets off a shockwave around the moon on the Orbital Impact page (below), and Split Mode is renamed
 Key Range, with its Any Note choice now All Keys. It is the same parameter in the same place with the same choices,
@@ -311,6 +321,10 @@ The tests load the plug-in through the CLAP API and check (about 474,000 checks)
   - Retrigger against Free;
   - One Shot holding;
   - a synced LFO changing on the beat, staying in step through a new tempo, and lining up after a jump;
+  - a synced square at 1/32 against the song's place off its line (up to 0.002 of a quarter either way, also with
+    the blocks in parts; swing 60's ticks; run twice a block; at 127 and 40 BPM, 44.1 kHz): each edge once, near
+    its place, read from the kick's pitch; and the place moved back under a 64th note (held) and over it (the edge
+    played again);
   - LFO 2 on Metal Noise 1;
 - the CVs (each the same as turning its knob, adding, Accent, taken at the hit or not);
 - every MIDI controller in the map, and 120, 121 and 123 at 0 (as Melodee sends them) moving nothing;

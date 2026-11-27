@@ -69,7 +69,8 @@ inline int parity (uint32_t x) { return __builtin_parity (x); }
 // --- LFO ------------------------------------------------------------------------------------------------------------
 // Its place is a function of the time (frames since prepare): the phase it had at an anchor plus the frames since
 // times its rate. So it costs nothing while nothing sounds, and the same frames give the same place whatever the
-// host's block size. A new rate, a retrigger, or the song's place (Clock synced, Mode Free) sets a new anchor.
+// host's block size. A new rate, a retrigger, or the song's place (Clock synced, Mode Free) sets a new anchor. An
+// anchor still to come holds it where it is until then (the song's place told a little behind where it got to).
 struct Lfo
 {
     double phase0 = 0.0;  // its place at the anchor, in cycles
@@ -80,7 +81,7 @@ struct Lfo
 
     double phaseAt (int64_t t) const
     {
-        const double p = phase0 + (double) (t - t0) * inc;
+        const double p = phase0 + (double) std::max<int64_t> (t - t0, 0) * inc;
         if (once)
             return p < 1.0 ? p : 1.0;
         return p - std::floor (p);
@@ -90,6 +91,11 @@ struct Lfo
     {
         if (newInc == inc)
             return;
+        if (t < t0) // held: from its anchor on at the new rate
+        {
+            inc = newInc;
+            return;
+        }
         const double p = phaseAt (t);
         inc = newInc;
         anchor (t, p);
@@ -271,9 +277,14 @@ struct MetalNoise
 };
 
 // --- Engine -------------------------------------------------------------------------------------------------------
-// A jump in the song's place larger than this (beats) is a jump; smaller is CLAP's rounding of the position.
 constexpr float ln1000 = 6.90775528f; // a fall of 60 dB in natural-log units: Decay's time
+// The song's place moved by no more than this (beats) from where the last block's frames led is CLAP's rounding of it.
 constexpr double jumpSlack = 1.0e-3;
+// By a 64th note (in quarters: hdslaveOS's own jump tolerance) or more, it is a jump (a locate, a loop going round).
+// Less is drift: hdslaveOS works the place out from its ticks, so it is not quite a straight line from block to block
+// (a swung tick, a tick on a block's edge, MTC's trim: up to 0.0021 of a quarter), and a plug-in two tracks play is run
+// twice a block (its second call told a block on, the next block's first a block back).
+constexpr double jumpBeats = 1.0 / 16.0;
 
 class Engine
 {
@@ -366,16 +377,28 @@ public:
     // Clock follows the tempo use it; one running Free keeps in step with the song's beats from Play and after a jump.
     void transport (bool isPlaying, bool placed, double beats, double tempo, uint32_t frames)
     {
-        const bool started = isPlaying && placed && (! playing || expectBeats < 0.0 || std::fabs (beats - expectBeats) > jumpSlack);
-        playing = isPlaying && placed;
+        const double moved = std::fabs (beats - expectBeats);
+        const bool started = isPlaying && placed && (! playing || expectBeats < 0.0 || moved >= jumpBeats);
+        const bool drifted = isPlaying && placed && ! started && moved > jumpSlack;
         const bool newTempo = tempo != bpm;
+        // The song's place is counted on from Play, a jump, drift or a new tempo, not from each block's (rounded)
+        // start, so it is the same at a frame whatever the block size.
+        const bool count = started || drifted || (isPlaying && placed && newTempo);
+        // Where the count has got to, at the tempo it was counted at.
+        const double reached = count && ! started ? songAt (now) : 0.0;
+        playing = isPlaying && placed;
         if (newTempo)
             bpm = tempo, dirty = true; // the synced LFOs' rates, at the next tick
-        // The song's place is counted on from Play, a jump or a new tempo, not from each block's (rounded) start, so
-        // it is the same at a frame whatever the block size.
-        if (started || (playing && newTempo))
+        if (count)
         {
-            songBeats0 = beats, songT0 = now;
+            // Drift behind where the count has got to (or a new tempo told there) holds it, and the LFOs in step with
+            // the song, until the song is there again: no edge or cycle start comes twice. Else (Play, a jump, drift
+            // ahead) it goes on from the place told, from this frame.
+            const double behind = started ? 0.0 : reached - beats;
+            if (behind > (drifted ? 0.0 : jumpSlack))
+                songBeats0 = reached, songT0 = now + (int64_t) std::ceil (behind / (bpm / 60.0 / rate));
+            else
+                songBeats0 = beats, songT0 = now;
             for (int i = 0; i < 2; ++i) // a new tempo too: in step from this frame, not from the next tick
                 alignToSong (i);
         }
@@ -505,17 +528,21 @@ private:
     // same to the bit and setRate() sees no change).
     double syncedInc (int clock) const { return bpm / 60.0 / lfoClockBeats[clock] / rate; }
 
+    // The song's place at frame t, as counted from the place last told (held until songT0 when it was told behind).
+    double songAt (int64_t t) const { return songBeats0 + (double) std::max<int64_t> (t - songT0, 0) * bpm / 60.0 / rate; }
+
     // An LFO whose Clock follows the tempo and whose Mode is Free sits where the song's beats put it, while the host
-    // plays: a cycle starts on each multiple of its note value from the song's top.
+    // plays: a cycle starts on each multiple of its note value from the song's top. Held, it stands where it got to
+    // until the hold ends.
     void alignToSong (int i)
     {
         const int clock = (int) knob[lfoId (i, lfoClockOf)];
         if (! playing || clock <= 0 || clock > 10 || (int) knob[lfoId (i, lfoModeOf)] != 0)
             return;
-        const double beats = songBeats0 + (double) (now - songT0) * bpm / 60.0 / rate;
-        const double cycles = beats / lfoClockBeats[clock];
+        const int64_t from = std::max (now, songT0);
+        const double cycles = songAt (from) / lfoClockBeats[clock];
         lfo[i].inc = syncedInc (clock); // the tempo's rate from here, if it just changed
-        lfo[i].anchor (now, cycles - std::floor (cycles));
+        lfo[i].anchor (from, cycles - std::floor (cycles));
     }
 
     // A hit's strength: velocity as far as Dynamics lets it, and the Accent CV (1 a full hit, up to 2).
