@@ -1127,8 +1127,10 @@ struct Made
     std::vector<uint64_t> hits;
 };
 
-// Plays the calls, the song playing throughout, a hit of `key` at the first call of every `hitEvery`th block.
-Made playCalls (Instance& a, const std::vector<Call>& calls, double bpm, int key, uint64_t hitEvery)
+// Plays the calls, the song playing throughout, a hit of `key` at the first call of every `hitEvery`th block; the tempo
+// told is `bpm`, or `tempoAt (frame)` where given.
+Made playCalls (Instance& a, const std::vector<Call>& calls, double bpm, int key, uint64_t hitEvery,
+                const std::function<double (uint64_t)>& tempoAt = {})
 {
     Made m;
     std::vector<float> l (128), r (128);
@@ -1144,7 +1146,7 @@ Made playCalls (Instance& a, const std::vector<Call>& calls, double bpm, int key
         clap_event_transport tr {};
         tr.header = { sizeof (clap_event_transport), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT, 0 };
         tr.flags = CLAP_TRANSPORT_HAS_TEMPO | CLAP_TRANSPORT_HAS_BEATS_TIMELINE | CLAP_TRANSPORT_IS_PLAYING;
-        tr.tempo = bpm;
+        tr.tempo = tempoAt ? tempoAt (c.at) : bpm;
         tr.song_pos_beats = (clap_beattime) std::llround (c.beats * (double) CLAP_BEATTIME_FACTOR);
         float* outs[2] = { l.data(), r.data() };
         clap_audio_buffer buffer {};
@@ -1165,8 +1167,9 @@ Made playCalls (Instance& a, const std::vector<Call>& calls, double bpm, int key
 }
 
 // Where a synced LFO's edges belong, in the plug-in's time: a cycle of `cycleBeats` from the song's top, its half-cycle
-// index the place it has got to. A place a little behind (under a 64th note) holds it until the song is past again; a
-// place moved further (a locate) puts it there. The frames where the index changes.
+// index the place it has got to. A place a little behind (a 64th note or less) holds it until the song is past again; a
+// place moved further from where the last call led or from where it got to (a locate) puts it there. The frames where
+// the index changes.
 std::vector<uint64_t> edgesDue (const std::vector<Call>& calls, double bpm, double rate, double cycleBeats)
 {
     const double perFrame = bpm / 60.0 / rate, half = cycleBeats / 2.0;
@@ -1177,7 +1180,7 @@ std::vector<uint64_t> edgesDue (const std::vector<Call>& calls, double bpm, doub
     for (size_t k = 0; k < calls.size(); ++k)
     {
         const auto& c = calls[k];
-        if (k == 0 || std::fabs (c.beats - expect) >= 1.0 / 16.0)
+        if (k == 0 || std::fabs (c.beats - expect) > 1.0 / 16.0 || high - c.beats > 1.0 / 16.0)
             high = c.beats;
         for (uint32_t i = 0; i < c.frames; ++i, ++t)
         {
@@ -1331,29 +1334,70 @@ void testPositionJitter()
         // block back. In the plug-in's own time the edges come once each, in the run told their place first.
         check ("run twice", hostCalls (blocks, bpm, rate, [&] (uint64_t at) { return (double) at * perFrame; }, {}, true), 2 * near, 2);
     }
-    // A real locate still counts: the place moved back across an edge by a 64th note or more plays that edge again
-    // when the song reaches it; by less, the edge is held. Two beats at 127 BPM, the place moved back about 0.03 quarter
-    // after the edge at beat 1. In the 0.07 quarter from there: held, no edge (the song is back past where it was at
-    // 0.05, the next edge at 1.0625); moved back 0.08, back over the edge at beat 1 and over it again (two).
-    {
-        const double bpm = 127.0, perFrame = bpm / 60.0 / rate;
+    // A real locate still counts: the place moved back across an edge by more than a 64th note plays that edge again
+    // when the song reaches it; by a 64th or less, the edge is held (hdslaveOS's own test: a move over 1/16 quarter).
+    // Two beats, the place moved back about 0.03 quarter after the edge at beat 1. In the 0.07 quarter from there: held,
+    // no edge (the song is back past where it was after the move, the next edge at 1.0625); moved further, back over the
+    // edge at beat 1 and over it again (two). Exactly a 64th at 120 BPM and 32,768 Hz, where a block is 1/128 beat and
+    // every place told is exact.
+    auto locate = [&] (double r, double bpm, double by, int expected) {
+        const double perFrame = bpm / 60.0 / r;
+        const double split = r / 5600.0; // between the two periods (7.9 and 4.0 kHz)
         const uint64_t blocks = (uint64_t) (2.0 / perFrame / 128.0), at = (uint64_t) (1.03 / perFrame / 128.0) * 128;
-        for (double by : { 0.05, 0.08 })
+        const auto calls = hostCalls (blocks, bpm, r, [&] (uint64_t f) { return (double) f * perFrame - (f >= at ? by : 0.0); });
+        Instance a (r);
+        a.setup (patch);
+        const auto m = playCalls (a, calls, bpm, 96, (uint64_t) (r / 128.0));
+        const auto due = edgesDue (calls, bpm, r, cycle);
+        const auto heard = edgesHeard (m, split);
+        int after = 0;
+        long worst = 0;
+        for (uint64_t e : heard.at)
         {
-            const auto calls = hostCalls (blocks, bpm, rate, [&] (uint64_t f) { return (double) f * perFrame - (f >= at ? by : 0.0); });
-            Instance a (rate);
-            a.setup (patch);
-            const auto m = playCalls (a, calls, bpm, 96, hitEvery);
-            const auto x = hear (m, calls, bpm);
-            int after = 0;
-            for (uint64_t e : edgesHeard (m, between).at)
-                after += e + 64 >= at && (double) e <= (double) at + 0.07 / perFrame;
-            if (debug)
-                std::printf ("debug jitter locate back %.2f: %d edges due, %d heard (%d just after it), worst %ld frames\n", by, x.due, x.edges,
-                             after, x.worst);
-            CHECK (x.edges == x.due && x.worst <= 48);
-            CHECK (after == (by < 1.0 / 16.0 ? 0 : 2));
+            after += e + 64 >= at && (double) e <= (double) at + 0.07 / perFrame;
+            long nearest = 1L << 40;
+            for (uint64_t d : due)
+                nearest = std::min (nearest, std::labs ((long) e - (long) d));
+            worst = std::max (worst, nearest);
         }
+        if (debug)
+            std::printf ("debug jitter locate back %.4f at %.0f BPM, %.0f Hz: %zu edges due, %zu heard (%d just after it), worst %ld frames\n", by,
+                         bpm, r, due.size(), heard.at.size(), after, worst);
+        CHECK (heard.at.size() == due.size() && worst <= 48);
+        CHECK (after == expected);
+    };
+    locate (rate, 127.0, 0.05, 0);
+    locate (rate, 127.0, 0.08, 2);
+    locate (32768.0, 120.0, 1.0 / 16.0, 0);
+
+    // MTC's trim: the place runs at its speed (here 0.995) while the tempo told stays as it is, for 6000 blocks (17 s at
+    // 127 BPM: 0.18 quarter behind a count at the tempo told). Then one block is told 0.0015 back (a swung tick), or the
+    // tempo told moves to 127.01. The count follows the place all along, so the LFO stands still for no more than the
+    // step: the longest wait from one edge to the next is a half-cycle and a 64th note at most, and none comes twice.
+    for (int event = 0; event < 2; ++event)
+    {
+        const double bpm = 127.0, perFrame = bpm / 60.0 / rate, speed = 0.995;
+        const uint64_t from = 6000 * 128, blocks = 6000 + 344;
+        const auto calls = hostCalls (blocks, bpm, rate, [&] (uint64_t f) {
+            return (double) f * perFrame * speed - (event == 0 && f >= from ? 0.0015 : 0.0);
+        });
+        Instance a (rate);
+        a.setup (patch);
+        const auto m = playCalls (a, calls, bpm, 96, hitEvery, [&] (uint64_t f) { return event == 1 && f >= from ? 127.01 : bpm; });
+        const auto heard = edgesHeard (m, between);
+        const double halfFrames = cycle / 2.0 / (perFrame * speed);
+        double longest = 0.0;
+        int twice = 0;
+        for (size_t k = 1; k < heard.at.size(); ++k)
+            longest = std::max (longest, (double) (heard.at[k] - heard.at[k - 1]));
+        for (size_t k = 1; k < heard.runs.size(); ++k)
+            twice += heard.runs[k] < 0.5 * halfFrames;
+        if (debug)
+            std::printf ("debug jitter MTC 0.995 then %s: %zu edges, the longest %.0f frames apart (a half-cycle %.0f), %d twice\n",
+                         event == 0 ? "0.0015 back" : "127.01 BPM", heard.at.size(), longest, halfFrames, twice);
+        CHECK (heard.at.size() > 400);
+        CHECK (longest <= halfFrames + (1.0 / 16.0) / (perFrame * speed));
+        CHECK (twice == 0);
     }
 }
 

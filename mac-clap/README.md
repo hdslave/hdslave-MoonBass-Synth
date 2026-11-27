@@ -8,8 +8,9 @@ Separate desktop CLAP build of **hdslave MoonBass** for **FL Studio** (2024+) an
 - **Standalone from the MPC Sample build:** this directory is completely separate from the MPC Sample build in the repository root (`../src`, `../build.sh`). GitHub releases remain MPC Sample-only for now while the desktop builds are being finalized.
 
 Version 0.1.8 has the MPC build's fix for an LFO in step with the song (Clock a note value, Mode Free): a place told
-a little behind where it got to (under a 64th note) holds it until the song is past it again, so no Square or Pulse
-edge comes twice. Desktop hosts tell a straight place, so there it rarely mattered.
+a little behind where it got to (a 64th note or less) holds it until the song is past it again, so no Square or Pulse
+edge comes twice, and the place it counts from follows the place told, so a slow drift never builds up into a long
+hold. Desktop hosts tell a straight place, so there it rarely mattered.
 
 Version 0.1.7 brings the MPC build's hit shockwave to the Orbital Impact tile:
 - a flash of the moon;

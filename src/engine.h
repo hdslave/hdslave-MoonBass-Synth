@@ -278,9 +278,9 @@ struct MetalNoise
 
 // --- Engine -------------------------------------------------------------------------------------------------------
 constexpr float ln1000 = 6.90775528f; // a fall of 60 dB in natural-log units: Decay's time
-// The song's place moved by no more than this (beats) from where the last block's frames led is CLAP's rounding of it.
+// The song's place told no more than this (beats) from where its count has got to is CLAP's rounding of it.
 constexpr double jumpSlack = 1.0e-3;
-// By a 64th note (in quarters: hdslaveOS's own jump tolerance) or more, it is a jump (a locate, a loop going round).
+// By more than a 64th note (in quarters: hdslaveOS's own jump tolerance), it is a jump (a locate, a loop going round).
 // Less is drift: hdslaveOS works the place out from its ticks, so it is not quite a straight line from block to block
 // (a swung tick, a tick on a block's edge, MTC's trim: up to 0.0021 of a quarter), and a plug-in two tracks play is run
 // twice a block (its second call told a block on, the next block's first a block back).
@@ -398,26 +398,30 @@ public:
     // Clock follows the tempo use it; one running Free keeps in step with the song's beats from Play and after a jump.
     void transport (bool isPlaying, bool placed, double beats, double tempo, uint32_t frames)
     {
-        const double moved = std::fabs (beats - expectBeats);
-        const bool started = isPlaying && placed && (! playing || expectBeats < 0.0 || moved >= jumpBeats);
-        const bool drifted = isPlaying && placed && ! started && moved > jumpSlack;
+        // The song played on from the last block: how far the place told is from where that block's frames led (the
+        // host's own test for a jump), and from where the song's count has got to (at the tempo it was counted at).
+        const bool going = isPlaying && placed && playing && expectBeats >= 0.0;
+        const double reached = going ? songAt (now) : 0.0;
+        const double off = going ? beats - reached : 0.0;
+        // Play, or a jump: more than a 64th note from either (as the host's `> jump_quarters`).
+        const bool started = isPlaying && placed && (! going || std::fabs (beats - expectBeats) > jumpBeats || -off > jumpBeats);
+        // Drift: the count more than CLAP's rounding from the place told, either way. Taken every time, so it never
+        // builds up (MTC's trim moves the place at its speed while the tempo told stays as it is).
+        const bool drifted = going && ! started && std::fabs (off) > jumpSlack;
         const bool newTempo = tempo != bpm;
         // The song's place is counted on from Play, a jump, drift or a new tempo, not from each block's (rounded)
         // start, so it is the same at a frame whatever the block size.
         const bool count = started || drifted || (isPlaying && placed && newTempo);
-        // Where the count has got to, at the tempo it was counted at.
-        const double reached = count && ! started ? songAt (now) : 0.0;
         playing = isPlaying && placed;
         if (newTempo)
             bpm = tempo, dirty = true; // the synced LFOs' rates, at the next tick
         if (count)
         {
-            // Drift behind where the count has got to (or a new tempo told there) holds it, and the LFOs in step with
-            // the song, until the song is there again: no edge or cycle start comes twice. Else (Play, a jump, drift
-            // ahead) it goes on from the place told, from this frame.
-            const double behind = started ? 0.0 : reached - beats;
-            if (behind > (drifted ? 0.0 : jumpSlack))
-                songBeats0 = reached, songT0 = now + (int64_t) std::ceil (behind / (bpm / 60.0 / rate));
+            // Drift behind holds the count, and the LFOs in step with the song, where they got to until the song is
+            // there again: no edge or cycle start comes twice. Else (Play, a jump, drift ahead, a new tempo) it goes
+            // on from the place told, from this frame.
+            if (drifted && off < 0.0)
+                songBeats0 = reached, songT0 = now + (int64_t) std::ceil (-off / (bpm / 60.0 / rate));
             else
                 songBeats0 = beats, songT0 = now;
             for (int i = 0; i < 2; ++i) // a new tempo too: in step from this frame, not from the next tick
