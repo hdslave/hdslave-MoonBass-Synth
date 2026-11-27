@@ -381,14 +381,19 @@ public:
             silence();
     }
 
-    // A MIDI note: plays if Key Range takes its key, the pitch counted from the range's lowest key.
+    // A MIDI note: the pitch counted from the Key Range's lowest key. A key outside the range (silent up to 0.1.8)
+    // plays the key of its name inside the range, the nearest octave in (C1, a range of one key: C1), so a pad bank
+    // (the drum map's - / +) is never silent; a key inside it plays as it always has.
     void note (int key, float velocity, int noteId = -1)
     {
         const int split = std::min (std::max ((int) knob[ParamId::splitMode], 0), 6);
         const KeyRange range = splitRanges[split];
-        if (key < range.low || key > range.high)
-            return;
-        const int n = split == 0 ? 0 : key - range.low;
+        int n = split == 0 ? 0 : key - range.low;
+        const int span = range.high - range.low;
+        if (n < 0)
+            n = span < 12 ? 0 : (n % 12 + 12) % 12;
+        else if (n > span)
+            n = span < 12 ? 0 : n - 12 * ((n - span + 11) / 12);
         const float octaves = knob[ParamId::pitchMode] >= 0.5f ? (float) n / 12.0f
                                                                 : std::log2 (1.0f + (float) n * linearKeyStep); // a semitone at the bottom, then equal Hz
         trigger (clampf (velocity, 0.0f, 1.0f), octaves, key, noteId);
@@ -488,7 +493,7 @@ public:
     float lastHitStrength() const { return hitStrength; }
 
 private:
-    uint32_t hits = 0; // screen notification; counts only kicks that pass the note filter, one a frame
+    uint32_t hits = 0; // screen notification; counts the kicks, one a frame
     enum Smoothed { pitchKnobS, harmonicsS, eqKnobS, compressionS, gainS, lfo1IntS, lfo2IntS, smoothed };
     enum LfoParam { lfoWaveOf, lfoSpeedOf, lfoIntOf, lfoDestOf, lfoModeOf, lfoClockOf };
     static uint32_t lfoId (int which, LfoParam p) { return (which == 0 ? ParamId::lfo1Wave : ParamId::lfo2Wave) + (uint32_t) p; }

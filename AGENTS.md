@@ -41,6 +41,7 @@ Read `../AGENTS.md`, then `../Workflow/plugins.md` and `../Workflow/host-facts.m
 
 - **Latched at the hit on purpose:** Tune, Decay, Pulse, Noise, Attack, the metal noises, the mask and Gate Time, as on the hardware.
 - **MIDI CC map.** CC 120, 121 and 123 at value 0 are channel mode, never parameter changes. `NOTE_CHOKE` stops the hit its key played.
+- **Pads and banks.** `padMapJson` in `src/moonbass.cpp` is the drum map hdslaveOS reads from the library (pads A01-A16 = keys 36-51, "Kick 1"-"Kick 16"), so − / + move the bank. `Engine::note` keeps every key's 0.1.8 pitch inside the Key Range; a key outside it (silent up to 0.1.8) plays the same-named key an octave in (C1: as C1). There is no bank-as-octave remap: MoonBass has no step pads. The desktop copy in `mac-clap/src` keeps the old range filter.
 - **Same-frame triggers.** Two triggers on one frame keep the louder one; on a tie, the later one.
 - The parameter count stays a multiple of three (a `static_assert`).
 - **The page's shockwave** (`src/ui/shockwave.h`) is drawn from each hit's age alone, so a repeated paint touches nothing and a whole repaint equals a partial one (`testShockwave`). It draws only with the page's inks (`inks` in `src/screen.h`: the art's palette, the page's colours and mixes of two of them). `build/page` (`make page`) renders its frames outside a host; `tools/bench.sh` counts a frame's instructions.

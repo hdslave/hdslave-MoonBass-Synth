@@ -28,6 +28,25 @@ const clap_plugin_descriptor descriptor {
     features,
 };
 
+// The pads as Melodee reads them from a plug-in's library: with this, a plug-in track on MoonBass plays its pads as
+// keys 36-51 (pads A01-A16) whatever the track's octave or key, names them on the Keys page, and - / + move the bank
+// (B 52-67, C 68-83, D 84-99). Every key plays a kick (Engine::note). Kept in the binary by padsJson() below.
+[[gnu::used]] const char padMapJson[] =
+    "{\"pad_layout\":\"drums\",\"name\":\"hdslave MoonBass\",\"levels\":{"
+    "\"p1\":{\"name\":\"Kick 1\",\"note\":36},\"p2\":{\"name\":\"Kick 2\",\"note\":37},"
+    "\"p3\":{\"name\":\"Kick 3\",\"note\":38},\"p4\":{\"name\":\"Kick 4\",\"note\":39},"
+    "\"p5\":{\"name\":\"Kick 5\",\"note\":40},\"p6\":{\"name\":\"Kick 6\",\"note\":41},"
+    "\"p7\":{\"name\":\"Kick 7\",\"note\":42},\"p8\":{\"name\":\"Kick 8\",\"note\":43},"
+    "\"p9\":{\"name\":\"Kick 9\",\"note\":44},\"p10\":{\"name\":\"Kick 10\",\"note\":45},"
+    "\"p11\":{\"name\":\"Kick 11\",\"note\":46},\"p12\":{\"name\":\"Kick 12\",\"note\":47},"
+    "\"p13\":{\"name\":\"Kick 13\",\"note\":48},\"p14\":{\"name\":\"Kick 14\",\"note\":49},"
+    "\"p15\":{\"name\":\"Kick 15\",\"note\":50},\"p16\":{\"name\":\"Kick 16\",\"note\":51}}}";
+const char* padsJson()
+{
+    const char* volatile json = padMapJson;
+    return json;
+}
+
 struct Plugin
 {
     clap_plugin clap {};
@@ -226,7 +245,7 @@ void handle (Plugin& p, const clap_event_header* e, const clap_output_events* ou
         }
         case CLAP_EVENT_NOTE_ON:
         {
-            // A note plays the kick if Key Range takes its key (a note off does nothing: Gate Time is the gate).
+            // A note plays the kick, its pitch from its key and Key Range (a note off does nothing: Gate Time is the gate).
             const auto* n = reinterpret_cast<const clap_event_note*> (e);
             if (n->velocity > 0.0 && n->key >= 0 && n->key < 128)
                 p.engine.note (n->key, (float) n->velocity, n->note_id);
@@ -442,6 +461,7 @@ const clap_plugin_note_ports noteExtension { noteCount, noteGet };
 bool pluginInit (const clap_plugin* plugin)
 {
     auto& p = of (plugin);
+    (void) padsJson();
     p.hostScreen = static_cast<const melodee_screen_host_t*> (p.host->get_extension (p.host, MELODEE_SCREEN_CLAP_HOST));
     p.hostParams = static_cast<const clap_host_params*> (p.host->get_extension (p.host, CLAP_EXT_PARAMS));
     for (uint32_t i = 0; i < paramCount; ++i)

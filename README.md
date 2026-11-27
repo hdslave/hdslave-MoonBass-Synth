@@ -19,7 +19,14 @@ Built for the Akai MPC Sample running [Melodee](https://github.com/keremimo/melo
 
 One punchy voice, triggered by MIDI notes (pads, keys, host sequencer) or its built-in Play trigger.
 
-Version 0.1.8. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+Version 0.2.0. The custom screen uses `melodee.screen/1` on Melodee 0.7 and hdslaveOS based on it. Open Edit on the plug-in track or select PANEL on Stage.
+
+In 0.2.0, MoonBass holds up to hdslaveOS's − / +. Its library carries a drum map, so a plug-in track on it plays its
+pads as Drums: pads A01-A16 send keys 36-51 whatever the track's octave, key or scale, the Keys page names them
+Kick 1 … Kick 16, and − / + move the pad bank instead of the octave. Every key that played a kick before plays exactly
+what it did; a key its Key Range used to leave silent now plays the key of the same name inside the range (see "Pads
+and banks" below), so no bank is ever silent. 23 of the 64 fingerprints moved: exactly the random scenarios that
+play keys outside their Key Range. Not yet run on the MPC.
 
 In 0.1.8, an LFO in step with the song (Clock a note value, Mode Free) takes the song's place a little off its line
 as no jump. hdslaveOS works the place out from its ticks, so a swung tick, a tick on a block's edge or MTC's trim puts
@@ -130,7 +137,7 @@ gives units where the manuals give them.
 | LFO 1 Mode | LFO Sync (FrE/SYn) + LFO One Shot (2nd function) | — (always restarts on the gate) | Free: runs on; Retrigger: starts again at each hit (a second pitch envelope); One Shot: one cycle from each hit, then holds where the cycle ends |
 | LFO 1 Clock | LFO Speed "Mid": MIDI clock | — | Free (Speed) / 2/1 … 1/32 with triplets: a cycle a note value at the host's tempo. With Mode Free it keeps in step with the song's beats (a cycle starts on each multiple from the top) |
 | LFO 2 … | — | LFO 2 (red page): the same | as LFO 1 |
-| Key Range | Split Mode: SM1 (C1), SM2 (C1-F3) | Split Mode: SM1 (C1), SM2-SM4 (C1-C2, C2-C3, C3-C4), SM5 (C1-C6) | All Keys (new: every key plays the kick as set) / C1 / C1-C2 / C2-C3 / C3-C4 / C1-C6 / C1-F3. Keys outside the range don't play; inside it, the pitch counts up from its lowest key |
+| Key Range | Split Mode: SM1 (C1), SM2 (C1-F3) | Split Mode: SM1 (C1), SM2-SM4 (C1-C2, C2-C3, C3-C4), SM5 (C1-C6) | All Keys (new: every key plays the kick as set) / C1 / C1-C2 / C2-C3 / C3-C4 / C1-C6 / C1-F3. Inside the range the pitch counts up from its lowest key; a key outside it (silent up to 0.1.8) plays the key of the same name inside it, the nearest octave in (C1: as C1) |
 | Pitch Mode | Pitch Mode: Lin / SEM | — (not in exact semitones) | Linear: equal steps in Hz, a semitone's at the bottom / Semitones |
 | Dynamics | — (velocity up to Volume) | Trig Dynamics d01-d63 (for the Trig input) | 0 – 100 %: how far velocity sets the level; 0, every hit at full level |
 | CV n Dest | — | CV 1-4 Dest (orange) | Off, Tune, Pitch, Decay, Harmonics, Pulse, Noise, Attack, EQ, Compression, Metal Noise 1, Metal Noise 2, LFO 1 Rate, LFO 1 Int, LFO 2 Rate, LFO 2 Int, Accent |
@@ -146,7 +153,7 @@ and the LFOs** move while a kick sounds.
 
 ### Notes and velocity
 
-New instances and the Default preset start with Key Range at C1-F3. A note plays the kick if its key is in the Key Range. A note off does nothing: Gate Time is the gate. The level is the
+New instances and the Default preset start with Key Range at C1-F3. Every note plays the kick; its key and Key Range set its pitch (below). A note off does nothing: Gate Time is the gate. The level is the
 velocity as far as Dynamics lets it, times the Accent CV, times the gate's charge (a short gate puts less into the
 envelope). A new hit restarts the VCO's phase and the envelopes over whatever still sounds, as one voice does.
 
@@ -158,10 +165,28 @@ its pitch. A frame apart, both play.
 A choke stops the hit its key played, on its frame (a choke of any key, -1, stops whatever plays), and so does MIDI's
 All Sound Off (CC 120 at 0). Melodee sends both when it silences a track.
 
-- **All Keys** suits a drum track: every pad plays the kick as set.
-- **C1-C2** with **Linear** is the ModBase 09's way: the eight pads of a Melodee drum track (notes 36-43) play eight
-  tunings of one kick.
+- **All Keys** (or **C1**) suits a drum track: every pad, in every bank, plays the kick as set.
+- **C1-C2** with **Linear** is the ModBase 09's way: the pads play tunings of one kick.
 - **C1-F3** with **Semitones** and a long Decay is the MBase 11's way to play bass lines.
+
+### Pads and banks
+
+MoonBass's library holds a drum map (pads A01-A16 on keys 36-51, named Kick 1 … Kick 16), so on hdslaveOS a plug-in
+track on it plays its pads as Drums: the pads send keys 36-51 whatever the track's octave, key or scale, and − / +
+move the bank: B is 52-67, C 68-83, D 84-99, and below A 20-35 and 4-19. MoonBass has no sequencer, so a key keeps
+its own pitch: bank B's pad 1 is key 52, 16 semitones above pad A01 in C1-F3, as any keyboard or recorded note plays
+it.
+
+- **A key inside the Key Range** plays exactly what it played up to 0.1.8, to the bit.
+- **A key outside it** (silent up to 0.1.8) plays the key of the same name inside the range, the nearest octave in:
+  below the range, its lowest octave; above it, its top octave. C1, a range of one key, plays every key as C1. So in
+  C2-C3 pads A01-A12 play as 48-59, and in C1-F3 bank C's keys above 65 play as 54-65.
+- **All Keys** plays the kick as set on every key, as before.
+
+Up to 0.1.8 the pads followed the track's octave (Keys layout), so − / + moved them 12 keys with nothing on the
+screen, and in C1-F3 one − left every pad silent; C2-C3 and C3-C4 were silent on bank A. The desktop build
+(`mac-clap/`) has its own copy of the engine and keeps the old rule (keys outside the range don't play), since a
+desktop host has no pad banks.
 
 ### CV inputs
 
@@ -211,8 +236,8 @@ discovery does). A preset sets every parameter; Default puts everything back (th
 | Metal Kick | Both metal noise generators (337 and 77, mask M12) in a long gate |
 | Wobble Tail | A long tail with LFO 1 on Pitch, a sine at 1/16 in step with the song |
 | Zap | LFO 1 as a one-shot Saw Down on Pitch: the tail drops away |
-| Bass Line | Key Range C1-F3 in Semitones from C1 (32.7 Hz), Harmonics up, a long decay: play it from the keys |
-| Pad Tunings | Key Range C1-C2, Linear: each pad of a drum track a different tuning |
+| Bass Line | Key Range C1-F3 in Semitones from C1 (32.7 Hz), Harmonics up, a long decay: play it from the pads, − / + for another octave |
+| Pad Tunings | Key Range C1-C2, Linear: each pad a different tuning |
 
 They are the patches the demo renders play: the tests load each preset and check it gives the same values and the
 same samples as the demo's list.
@@ -290,7 +315,7 @@ Needs Docker with a Linux arm64 context (Melodee's `colima-melodee` and its `mel
 tools/bench.sh      # instruction counts (Melodee's melodee-profiler image)
 ```
 
-The tests load the plug-in through the CLAP API and check (about 474,000 checks):
+The tests load the plug-in through the CLAP API and check (about 878,000 checks):
 - the description, its features and ports;
 - every parameter's range, default and text both ways, its page (three to a page, one section each) and the documented
   range ends;
@@ -312,7 +337,9 @@ The tests load the plug-in through the CLAP API and check (about 474,000 checks)
   - the metal noises' rules (off, silent masks, numbers alike above the mask, M01's 10 kHz, M09-M16 each its own and
     slower);
 - which parameters a hit takes at its start and which move while it sounds;
-- each Key Range's keys and Pitch Mode's steps;
+- each Key Range's keys and Pitch Mode's steps; every key 0-127 in every range at the pitch 0.1.8 gave it, or
+  outside the range the same-named key's an octave in (none silent; 52 in C1-F3 is key 52, not 48); and the drum map
+  in the built library (sixteen pads, keys 36-51, as Melodee's reader finds it);
 - Dynamics, MIDI notes and Play;
 - two hits on one frame, either order (the louder plays as if alone, to the bit, at block sizes 1-4096), and a frame
   apart (both play);

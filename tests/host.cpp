@@ -850,27 +850,106 @@ void testKeyRangeAndPitchMode()
     // Fresh instances use C1-F3 and play the lowest key at the base pitch.
     const auto c1 = with ({}, 36);
     CHECK (peak (with ({}, 65), 0, 4800) > 0.0f);
-    CHECK (peak (with ({}, 35), 0, 4800) == 0.0f && peak (with ({}, 66), 0, 4800) == 0.0f);
+    // Outside it (silent up to 0.1.8), the key of the same name an octave in.
+    CHECK (same (with ({}, 35), with ({}, 47)) && same (with ({}, 66), with ({}, 54)));
     // All Keys: every key plays the kick as set.
     CHECK (same (c1, with ({ { "Key Range", 0 } }, 0)) && same (c1, with ({ { "Key Range", 0 } }, 100)));
-    // C1: only C1.
+    // C1: C1, and every other key (silent up to 0.1.8) as C1.
     CHECK (same (c1, with ({ { "Key Range", 1 } }, 36)));
-    CHECK (peak (with ({ { "Key Range", 1 } }, 37), 0, 48000) == 0.0f);
-    // C1-C2 in semitones: C2 an octave up; outside the range, nothing.
+    CHECK (same (c1, with ({ { "Key Range", 1 } }, 37)) && same (c1, with ({ { "Key Range", 1 } }, 52)) && same (c1, with ({ { "Key Range", 1 } }, 20)));
+    // C1-C2 in semitones: C2 an octave up; outside the range, the key of the same name inside it.
     CHECK_NEAR (frequency (with ({ { "Key Range", 2 } }, 48), 48000, 4800, 40000), 100.0, 0.3);
     CHECK_NEAR (frequency (with ({ { "Key Range", 2 } }, 43), 48000, 4800, 40000), 50.0 * std::pow (2.0, 7.0 / 12.0), 0.3);
-    CHECK (peak (with ({ { "Key Range", 2 } }, 49), 0, 48000) == 0.0f && peak (with ({ { "Key Range", 2 } }, 35), 0, 48000) == 0.0f);
-    // The other ranges: their lowest key plays Pitch, their ends play, past them nothing.
+    CHECK (same (with ({ { "Key Range", 2 } }, 49), with ({ { "Key Range", 2 } }, 37)) && same (with ({ { "Key Range", 2 } }, 35), with ({ { "Key Range", 2 } }, 47)));
+    // The other ranges: their lowest key plays Pitch, their ends play, past them the key an octave in.
     for (auto [mode, low, high] : { std::tuple { 3, 48, 60 }, std::tuple { 4, 60, 72 }, std::tuple { 5, 36, 96 }, std::tuple { 6, 36, 65 } })
     {
         CHECK (same (c1, with ({ { "Key Range", mode } }, low)));
         CHECK (peak (with ({ { "Key Range", mode } }, high), 0, 4800) > 0.0f);
-        CHECK (peak (with ({ { "Key Range", mode } }, high + 1), 0, 48000) == 0.0f);
-        CHECK (peak (with ({ { "Key Range", mode } }, low - 1), 0, 48000) == 0.0f);
+        CHECK (same (with ({ { "Key Range", mode } }, high + 1), with ({ { "Key Range", mode } }, high - 11)));
+        CHECK (same (with ({ { "Key Range", mode } }, low - 1), with ({ { "Key Range", mode } }, low + 11)));
     }
     // Linear: equal steps in Hz, a semitone's at the bottom.
     CHECK_NEAR (frequency (with ({ { "Key Range", 2 }, { "Pitch Mode", 0 } }, 48), 48000, 4800, 40000), 50.0 * (1.0 + 12.0 * (std::pow (2.0, 1.0 / 12.0) - 1.0)), 0.3);
     CHECK_NEAR (frequency (with ({ { "Key Range", 2 }, { "Pitch Mode", 0 } }, 37), 48000, 4800, 40000), 50.0 * std::pow (2.0, 1.0 / 12.0), 0.2);
+}
+
+// The pads with the drum map: A01-A16 send 36-51 and hdslaveOS's - / + move the bank (B 52-67, C 68-83, D 84-99, and
+// down). Every key, in every Key Range, plays a kick (none is silent); a key inside the range plays the pitch it
+// always did (0.1.8's: its keys above the range's lowest, a semitone each in Semitones), one outside it (silent up to
+// 0.1.8) the key of its name an octave in (C1, one key: C1's pitch). So with no sequencer, bank B's pad 1 (52) in
+// C1-F3 plays key 52: 16 semitones above pad A01, not 12.
+void testBanks()
+{
+    const Settings base = clean ({ { "Pitch", 0.5623 } }); // 50 Hz at the range's lowest key
+    auto with = [&] (int mode, int key) { Settings s = base; s.push_back ({ "Key Range", (double) mode }); return kick (s, { { 0, key } }, 1.0); };
+    const int lows[] = { 0, 36, 36, 48, 60, 36, 36 }, highs[] = { 127, 36, 48, 60, 72, 96, 65 };
+    auto keysUp = [&] (int mode, int key) {
+        if (mode == 0 || lows[mode] == highs[mode])
+            return 0;
+        int n = key - lows[mode];
+        while (n < 0) n += 12;
+        while (n > highs[mode] - lows[mode]) n -= 12;
+        return n;
+    };
+    int wrong = 0;
+    for (int mode = 0; mode <= 6; ++mode)
+        for (int key = 0; key < 128; ++key)
+        {
+            const double expected = 50.0 * std::pow (2.0, keysUp (mode, key) / 12.0);
+            const double heard = frequency (with (mode, key), 48000, 4800, 40000);
+            if (std::fabs (heard - expected) > 0.004 * expected)
+            {
+                if (++wrong <= 5)
+                    std::printf ("FAIL banks: Key Range %d key %d plays %.2f Hz, expected %.2f\n", mode, key, heard, expected);
+            }
+        }
+    CHECK (wrong == 0);
+    // Sequencer-less chromatic play keeps 0.1.8's keys: 52 is key 52 (16 semitones up), not 48.
+    CHECK_NEAR (frequency (with (6, 52), 48000, 4800, 40000), 50.0 * std::pow (2.0, 16.0 / 12.0), 0.4);
+    CHECK (! same (with (6, 52), with (6, 48)));
+    // A drum voice (All Keys): the same kick in every bank.
+    for (int key : { 4, 20, 52, 68, 84, 99 })
+        CHECK (same (with (0, 36), with (0, key)));
+}
+
+// The drum map in the library, as Melodee finds it: an object starting {"pad_layout":"drums", sixteen levels, each a
+// name and a note, the notes 36-51 once each.
+void testPadMap (const char* path)
+{
+    FILE* f = std::fopen (path, "rb");
+    CHECK (f != nullptr);
+    if (f == nullptr) return;
+    std::string bytes;
+    char buffer[65536];
+    for (size_t n; (n = std::fread (buffer, 1, sizeof (buffer), f)) > 0;)
+        bytes.append (buffer, n);
+    std::fclose (f);
+    const size_t at = bytes.find ("{\"pad_layout\":\"drums\"");
+    CHECK (at != std::string::npos);
+    if (at == std::string::npos) return;
+    const std::string json = bytes.substr (at, bytes.find ('\0', at) - at);
+    // Balanced and closed: the object ends where the string does.
+    int depth = 0;
+    size_t closed = std::string::npos;
+    bool inString = false;
+    for (size_t i = 0; i < json.size() && closed == std::string::npos; ++i)
+    {
+        const char c = json[i];
+        if (c == '"') inString = ! inString;
+        else if (! inString && c == '{') ++depth;
+        else if (! inString && c == '}' && --depth == 0) closed = i;
+    }
+    CHECK (closed == json.size() - 1);
+    CHECK (json.find ("\"name\":\"hdslave MoonBass\"") != std::string::npos);
+    int notes = 0, names = 0;
+    for (size_t i = json.find ("\"note\":"); i != std::string::npos; i = json.find ("\"note\":", i + 1)) ++notes;
+    for (size_t i = json.find ("\"name\":"); i != std::string::npos; i = json.find ("\"name\":", i + 1)) ++names;
+    CHECK (notes == 16 && names == 17); // sixteen pads, and the map's own name
+    int found = 0;
+    for (int k = 36; k <= 51; ++k)
+        found += json.find ("\"name\":\"Kick " + std::to_string (k - 35) + "\",\"note\":" + std::to_string (k) + "}") != std::string::npos;
+    CHECK (found == 16);
 }
 
 void testDynamicsAndPlay()
@@ -1676,11 +1755,11 @@ void testScreen()
     CHECK (draw() && memory == rest);
     const int resting = paints;
     CHECK (!draw() && paints == resting);
-    a.setup ({ { "Key Range", 1 } }); // C1 only
-    a.play ({ { 0, 37 } }, 0.01);
+    a.setup ({ { "Key Range", 1 } }); // C1: every key plays (as C1); a note at velocity 0 (a note off) does not
+    a.play ({ { 0, 36, 0.0 } }, 0.01);
     draw();
     CHECK (region (0, 45, 164, 122) == globe);
-    a.play ({ { 0, 36 } }, 0.01);
+    a.play ({ { 0, 37 } }, 0.01);
     CHECK (draw() && region (0, 45, 164, 122) != globe);
 
     c.stride = 319; CHECK (!draw (true)); c.stride = stride;
@@ -2085,6 +2164,8 @@ int main (int argc, char** argv)
     testMetalNoise();
     testTakenAtTheHit();
     testKeyRangeAndPitchMode();
+    testBanks();
+    testPadMap (argv[1]);
     testDynamicsAndPlay();
     testSameFrame();
     testChoke();
