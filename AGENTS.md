@@ -45,3 +45,7 @@ Read `../AGENTS.md`, then `../Workflow/plugins.md` and `../Workflow/host-facts.m
 - **Same-frame triggers.** Two triggers on one frame keep the louder one; on a tie, the later one.
 - The parameter count stays a multiple of three (a `static_assert`).
 - **The page's shockwave** (`src/ui/shockwave.h`) is drawn from each hit's age alone, so a repeated paint touches nothing and a whole repaint equals a partial one (`testShockwave`). It draws only with the page's inks (`inks` in `src/screen.h`: the art's palette, the page's colours and mixes of two of them). `build/page` (`make page`) renders its frames outside a host; `tools/bench.sh` counts a frame's instructions.
+
+## Release packaging
+
+Every release ZIP includes the full repository `LICENSE.txt` beside the third-party notices, outside signed plug-in bundles. Preserve both when packaging the plug-in for another project.
