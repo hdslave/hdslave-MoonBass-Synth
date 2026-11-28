@@ -22,6 +22,10 @@ Its size follows velocity and Accent, and its length the Decay. Before 0.1.7 tha
 
 Since 0.1.6, new instances and the Default preset start with **Key Range** at **C1-F3**. Key Range was called Split Mode before 0.1.7, and its **All Keys** choice Any Note; saved projects load unchanged.
 
+## hdslave plug-in license
+
+You may use these plug-ins to make, perform, record and sell music, including paid client work, without royalties or credit to hdslave. You may share complete, unchanged official releases for free with their notices intact. Selling the software, including it in a paid product or subscription, or distributing a modified version requires prior written permission from hdslave. Third-party components keep their own licenses. [Full plug-in license](../LICENSE.txt).
+
 ## Build & Install (macOS)
 
 Requires Xcode Command Line Tools and CMake 3.20+ (Ninja optional):
