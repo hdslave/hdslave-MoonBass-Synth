@@ -43,3 +43,7 @@ Read `../AGENTS.md`, then `../Workflow/plugins.md` and `../Workflow/host-facts.m
 - **MIDI CC map.** CC 120, 121 and 123 at value 0 are channel mode, never parameter changes. `NOTE_CHOKE` stops the hit its key played.
 - **Same-frame triggers.** Two triggers on one frame keep the louder one; on a tie, the later one.
 - The parameter count stays a multiple of three (a `static_assert`).
+
+## Release packaging
+
+Every release ZIP includes the full repository `LICENSE.txt` beside the third-party notices, outside signed plug-in bundles. Preserve both when packaging the plug-in for another project.

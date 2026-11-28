@@ -20,6 +20,10 @@ future version is refused untouched). The sound is unchanged to the bit outside 
 case above. MoonBass has not yet been run on the MPC; everything below was checked with the test host in this
 repository.
 
+## hdslave plug-in license
+
+You may use these plug-ins to make, perform, record and sell music, including paid client work, without royalties or credit to hdslave. You may share complete, unchanged official releases for free with their notices intact. Selling the software, including it in a paid product or subscription, or distributing a modified version requires prior written permission from hdslave. Third-party components keep their own licenses. [Full plug-in license](LICENSE.txt).
+
 ## Signal flow
 
 ```
