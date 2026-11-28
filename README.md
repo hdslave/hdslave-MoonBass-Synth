@@ -8,8 +8,8 @@
     <th width="66%">macOS and Windows · CLAP</th>
   </tr>
   <tr>
-    <td align="center"><a href="docs/moonbass-screen.gif"><img src="docs/moonbass-screen.gif" alt="MoonBass Orbital Impact screen running in hdslaveOS"></a></td>
-    <td align="center"><a href="mac-clap/assets/desktop-preview.gif"><img src="mac-clap/assets/desktop-preview.gif" alt="MoonBass desktop panel: its six screens, then Orbital Impact zoomed, kicks setting off the shockwave"></a></td>
+    <td align="center"><a href="docs/moonbass-screen.webp"><img src="docs/mpc-loop.webp" alt="MoonBass Orbital Impact screen running in hdslaveOS"></a></td>
+    <td align="center"><a href="mac-clap/assets/desktop-preview.webp"><img src="mac-clap/assets/desktop-loop.webp" alt="MoonBass desktop panel: its six screens, then Orbital Impact zoomed, kicks setting off the shockwave"></a></td>
   </tr>
 </table>
 
@@ -78,7 +78,7 @@ The harder the hit (velocity through Dynamics, and Accent), the bigger and brigh
 
 The orange graph previews the first 100 ms of pitch sweep above the resting note. The violet graph shows the gate hold and amplitude decay, including the effect of Compression. Both graphs follow the patch and its CV settings. The amplitude graph’s time scale changes for long tails.
 
-![MoonBass’s Orbital Impact page in hdslaveOS](docs/orbital-impact.png)
+![A kick sends a shockwave around the moon on the Orbital Impact page](docs/orbital-impact.webp)
 
 Press the encoder to play a kick from any page. Minus and Plus change pages. Turn K1–K3 to change the three displayed parameters. The wheel also adjusts K1, with fine increments on continuous parameters when a shifted wheel event reaches the page. A hollow mark under a value shows where its physical pot sits before pickup. [One kick in hdslaveOS, 2.5 times slower](docs/orbital-hit.gif)
 
